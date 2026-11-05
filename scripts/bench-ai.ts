@@ -4,7 +4,7 @@ import { buildPlayerView } from '../src/game/playerView';
 import { decide } from '../src/ai/aiPlayer';
 import type { Difficulty, PlayerAction, TableState } from '../src/game/types';
 
-const HANDS = 200;
+const HANDS = 5000;
 const MAX_ITER = 800;
 
 async function playSeries(seedPrefix: string, mode: 'new' | 'baseline') {
