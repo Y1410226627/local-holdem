@@ -63,7 +63,7 @@ bash 一键安装.sh --agent    # 非交互，适合自动化
 ### 方式三：命令行
 
 ```bash
-cd local-holdem        # macOS / Linux：cd ~/local-holdem
+cd <项目目录>        # 即包含 package.json 的目录，Windows / macOS / Linux 通用
 npm install
 npm run dev      # 启动开发服务器，浏览器打开 http://localhost:5173
 npm test         # 运行全部单元 / 集成测试
