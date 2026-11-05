@@ -1,6 +1,6 @@
 # AGENTS.md — 交给 AI Agent / 自动化工具的安装与验收说明
 
-本文件给 AI 编码 Agent、CI 或其他自动化工具使用；人类用户请看 [README.md](README.md) 或直接双击 `一键安装.bat`。
+本文件给 AI 编码 Agent、CI 或其他自动化工具使用；人类用户请看 [README.md](README.md)（Windows 双击 `一键安装.bat`，macOS 双击 `一键安装.command`）。
 
 ## 项目一句话
 
@@ -21,7 +21,9 @@ node scripts/setup.mjs --agent
 - 依次执行：检查 Node/npm 版本 → `npm install` → `npm test` → `npm run build`。
 - 成功标志：**退出码 0**，且输出最后一行 `SETUP_RESULT=OK`；失败退出码 1 并输出 `SETUP_RESULT=FAIL`。
 - 首次安装约 10–60 秒（取决于网络与 npm 缓存）。
-- Windows 上等价入口：`一键安装.bat --agent`（不会暂停、不会打开浏览器）。
+- 各平台等价入口（都不会暂停、不会打开浏览器）：
+  - Windows：`一键安装.bat --agent`
+  - macOS / Linux：`bash 一键安装.sh --agent`（macOS 也可双击 `一键安装.command`）
 
 其他选项：
 
@@ -60,7 +62,7 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 4. **AI 不能作弊**：AI 只能通过 `buildPlayerView()`（`src/game/playerView.ts`）读取自己的底牌与公共信息，禁止把其他玩家底牌传给 AI。
 5. **规则正确性优先**：改动引擎逻辑必须附带或更新 `src/tests/` 中的测试，并保证 `npm test` 全绿；注意边池、short all-in、单挑、大盲 option、未跟注退回、奇数筹码等边界。
 6. **可复现种子**：引擎随机性由 `seed + handNo` 决定（`src/game/cards.ts`）；UI 默认每局随机种子（`src/ui/seed.ts`）。
-7. 不要改动 `.bat` 文件的编码约定：**UTF-8 无 BOM + CRLF**，中文内容才能正常显示。
+7. 不要改动启动脚本的编码/权限约定：`.bat` 为 **UTF-8 无 BOM + CRLF**；`.sh` / `.command` 为 **LF**，且 `.command` / `.sh` 在 git 索引中需要保留可执行位（`chmod +x` / `git update-index --chmod=+x`）。
 
 ## 目录速览
 
@@ -80,6 +82,7 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 - [ ] `npm test`：16 个测试文件、213 个用例全部通过
 - [ ] `npm run build`：生成 `dist/`，无 TypeScript 错误
 - [ ] `npm run dev -- --host 127.0.0.1 --port 5173 --strictPort` 可启动，HTTP 探测 200
+- [ ] 启动脚本冒烟（按平台）：Windows `启动德州扑克.bat --no-open` / macOS-Linux `bash 启动德州扑克.sh --no-open` 能起服务并返回 200
 - [ ] 工作区没有 `node_modules/`、`dist/`、日志或临时脚本被误加入提交（`.gitignore` 已覆盖）
 
 ## 常见问题
@@ -88,8 +91,10 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 | --- | --- |
 | Node 版本过低 / `engine` 报错 | 安装 Node.js 22.12+（推荐 24 LTS）；不要用 Node 20 或 23/25 |
 | `npm install` 很慢或失败 | `npm config set registry https://registry.npmmirror.com` 后重试 |
-| 端口 5173 被占用 | `netstat -ano | findstr :5173` 找到 PID；或换端口 `--port 5174` |
+| 端口 5173 被占用 | Windows：`netstat -ano | findstr :5173`；macOS/Linux：`lsof -i :5173`；或换端口 `--port 5174` |
 | PowerShell 拒绝执行脚本 | 用 `.bat` 入口，或 `powershell -ExecutionPolicy Bypass -File ...`；Node 脚本不受影响 |
+| macOS 双击 `.command` 提示无法验证开发者 | 右键 → 打开；或 `xattr -dr com.apple.quarantine .`（仅下载 zip 后需要，git clone 不会） |
+| macOS/Linux 下 `$'\r': command not found` | 文件被转成了 CRLF；用 `sed -i 's/\r$//' 文件名` 或重新 `git checkout` |
 | 无浏览器 / 无 GUI 环境 | 跑 `npm test` + `npm run build` 即可验收；不需要真实浏览器 |
 | 本地大模型探测不到 | 那是可选项；确认本机服务已开 CORS（如 `OLLAMA_ORIGINS=*`）再试，不影响游戏 |
 

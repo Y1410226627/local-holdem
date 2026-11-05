@@ -27,37 +27,38 @@
 
 - Node.js **22.12+**（推荐 24 LTS）与 npm 10+；本项目在 Node.js 24 / npm 11 下验证。
 - 只有安装 npm 依赖需要联网，游戏本身纯本地运行、不调用任何外部 API。
-- Windows 推荐双击 `.bat` 使用；macOS / Linux 用命令行即可，功能一致。
+- 支持 Windows 10/11、macOS（Intel / Apple Silicon）与主流 Linux 桌面版；浏览器为 Edge / Chrome / Firefox 最新版。
 
-### 方式一：一键配置（Windows 推荐，首次使用）
+### 方式一：一键配置（首次使用）
 
-双击项目根目录下的 **`一键安装.bat`**：
+- **Windows**：双击 **`一键安装.bat`**；
+- **macOS**：双击 **`一键安装.command`**（若提示“无法验证开发者”：右键 → 打开，或执行 `xattr -dr com.apple.quarantine .`）；
+- **Linux / 终端**（macOS 也适用）：
+
+```bash
+bash 一键安装.sh            # 或：node scripts/setup.mjs
+bash 一键安装.sh --agent    # 非交互，适合自动化
+```
+
+无论哪种方式都会：
 
 - 自动检查 Node.js / npm 版本；
 - 安装依赖 → 运行全部测试 → TypeScript 类型检查 + 生产构建自检（全部通过才算配置成功）；
 - 完成后询问是否立即启动游戏（`Y` 直接开局）；
-- 也支持 `一键安装.bat --agent`：不提问、不启动浏览器，适合自动化。
+- 支持 `--agent`：不提问、不启动浏览器，适合交给 AI Agent / CI。
 
-macOS / Linux 或命令行用户：
+### 方式二：一键启动（日常使用）
 
-```bash
-node scripts/setup.mjs          # 安装 + 测试 + 构建自检
-node scripts/setup.mjs --agent  # 非交互模式，结束时输出 SETUP_RESULT=OK
-```
+- **Windows**：双击 **`启动德州扑克.bat`**；
+- **macOS**：双击 **`启动德州扑克.command`**；
+- **Linux**：`bash 启动德州扑克.sh`。
 
-### 方式二：一键启动（日常使用，Windows）
-
-双击项目根目录下的 **`启动德州扑克.bat`**：
-
-- 首次运行自动检查环境并安装依赖（需要联网，约 1-2 分钟）；
-- 自动启动本地服务并打开浏览器（http://localhost:5173）；
-- 再次双击时若检测到服务已在运行，只打开浏览器，不会重复启动；
-- 关闭命令行窗口或按 Ctrl+C 停止服务。
+首次运行自动检查环境并安装依赖（需要联网，约 1-2 分钟）；自动启动本地服务并打开浏览器（http://localhost:5173）；再次运行时若检测到服务已在运行，只打开浏览器，不会重复启动；关闭终端窗口或按 Ctrl+C 停止服务。
 
 ### 方式三：命令行
 
 ```bash
-cd local-holdem
+cd local-holdem        # macOS / Linux：cd ~/local-holdem
 npm install
 npm run dev      # 启动开发服务器，浏览器打开 http://localhost:5173
 npm test         # 运行全部单元 / 集成测试
@@ -70,6 +71,7 @@ npm run build    # TypeScript 类型检查 + 生产构建（输出 dist/）
 
 ```bash
 node scripts/setup.mjs --agent   # 成功时 exit 0，最后一行输出 SETUP_RESULT=OK
+# macOS / Linux 也可以：bash 一键安装.sh --agent
 ```
 
 更完整的 Agent 约束、修改指南与验收清单见 [AGENTS.md](AGENTS.md)。
@@ -85,8 +87,8 @@ npm run train        # 全量自博弈训练（约 3 秒，默认 2 轮）
 
 ### 训练机器人（让 AI 越打越强）
 
-- 双击 **`训练机器人.bat`**：先询问训练轮数（1–10000，默认 2）→ 显示预计耗时与预计文件大小增量 → 输入 `Y` 确认后才开始；轮数 ≥ 2 自动启用多核并行；
-- 或在命令行运行 `npm run train:quick` / `npm run train`（不交互，直接按参数执行）；
+- **Windows**：双击 **`训练机器人.bat`**：先询问训练轮数（1–10000，默认 2）→ 显示预计耗时与预计文件大小增量 → 输入 `Y` 确认后才开始；轮数 ≥ 2 自动启用多核并行；
+- **macOS / Linux**：运行 `npm run train`（交互式 `.bat` 仅 Windows；命令行训练功能相同，参数用 `--rounds=N` / `--seed=xxx`）；
 - 训练同时覆盖两类机器人：**规则引擎机器人**（四档参数进化）与**大模型机器人**（few-shot 经验库 + 可选微调 SFT 数据集）；
 - 产物：`src/ai/data/learnedProfiles.json`、`src/ai/data/llm-experience.json`、`training/llm-sft-dataset.jsonl`、`training/REPORT.md`；
 - 刷新页面后，设置栏会自动出现「使用训练后参数」开关（检测到训练数据时默认开启）。
@@ -101,6 +103,7 @@ npm run train        # 全量自博弈训练（约 3 秒，默认 2 轮）
 
 | 项目 | 最低配置 | 推荐配置 |
 | --- | --- | --- |
+| 操作系统 | Windows 10/11、macOS 12+、主流 Linux 桌面版 | — |
 | CPU | 双核 | 4 核及以上 |
 | 内存 | 4 GB | 8 GB 及以上 |
 | 磁盘 | 300 MB（含 npm 依赖） | 1 GB 空闲（SSD 更佳） |
@@ -386,7 +389,9 @@ npm run train -- --rounds=10 --workers=0   # 强制单线程
 ```
 local-holdem
 ├─ 一键安装.bat                  # Windows 一键配置（装依赖 + 测试 + 构建自检）
+├─ 一键安装.command / 一键安装.sh # macOS 双击 / macOS+Linux 终端 一键配置
 ├─ 启动德州扑克.bat              # Windows 一键启动（自动装依赖 + 开浏览器）
+├─ 启动德州扑克.command / .sh    # macOS 双击 / macOS+Linux 终端 一键启动
 ├─ 训练机器人.bat                # Windows 交互式训练（先问轮数/估时/确认）
 ├─ AGENTS.md                     # 给 AI Agent / 自动化工具的安装与验收说明
 ├─ .gitignore / .gitattributes   # 不提交 node_modules、dist；统一换行符
@@ -500,6 +505,7 @@ npm test
 | `npm run build` | 通过：53 modules，JS 402.01 kB（gzip 114.98 kB）、CSS 47.61 kB，训练数据已打包 |
 | `node scripts/setup.mjs --agent`（一键配置） | 退出码 0、最后一行 `SETUP_RESULT=OK`；环境检查 Node v24.19.0 / npm 11.17.0 → 安装依赖 → 213 个测试通过 → 构建 53 modules；`一键安装.bat --agent` 同样 exit 0 |
 | `启动德州扑克.bat` / `训练机器人.bat` 冒烟 | 启动器：检测环境 → 起服务 → `http://localhost:5173` 返回 200（含 `#root`）→ 停止后端口释放；训练入口：`--rounds=0` 被拒绝 exit 1，环境检查通过 |
+| macOS / Linux 启动脚本（Git Bash 5.3 冒烟） | 4 个 `.sh` / `.command` 语法检查通过（兼容 macOS 自带 bash 3.2）；`bash 一键安装.sh --agent` exit 0、输出 `SETUP_RESULT=OK`；`bash 启动德州扑克.sh --no-open` 起服务返回 200 后停止；安装后输入 `n` 正确跳过启动；`.command` 已在 git 索引标记可执行位 |
 | `npm run train -- --rounds=10 --seed=demo-b`（16 worker 并行） | 约 2.5 秒，14520 手，3/4 档参数更新（接受 6 个变异），生成 160 条 few-shot 与 119 行 SFT |
 | `训练机器人.bat` 交互 / 无人值守 | 轮数 1–10000（默认 2）→ 预计耗时 + 文件大小增量 → `Y/N` 确认；`--yes --rounds=100` 无人值守 exit 0；`--rounds=1000000` 被拒绝 exit 1 |
 | 多核并行加速 | 同 seed 实测：2 轮 3.3s→1.1s、10 轮 10.8s→2.3s；100 轮 16 worker 实测 13.1 秒（120,360 手，接受 65 个变异）；并行与单线程 profiles/metrics/经验库/SFT 一致 |
@@ -539,13 +545,14 @@ git push -u origin main
 git remote add origin https://github.com/<你的用户名>/<仓库名>.git
 ```
 
-别人拿到仓库后：双击 `一键安装.bat`（或运行 `node scripts/setup.mjs`）即可到手即用；也可以把仓库地址和 [AGENTS.md](AGENTS.md) 一起交给 AI Agent，让它按文档完成安装与验收。
+别人拿到仓库后，按系统选一种方式即可到手即用：Windows 双击 `一键安装.bat`；macOS 双击 `一键安装.command`；Linux 运行 `bash 一键安装.sh`（也都可以用 `node scripts/setup.mjs`）。也可以把仓库地址和 [AGENTS.md](AGENTS.md) 一起交给 AI Agent，让它按文档完成安装与验收。
 
 ---
 
 ## 已知限制
 
 - 桌面浏览器优先（建议宽度 ≥ 1200px；1440×900 下页面需少量纵向滚动，人类行动时操作区会自动滚入视野），未专门适配手机触摸布局。
+- macOS / Linux 提供 `.command` / `.sh` 启动器，功能与 Windows `.bat` 一致；本项目主要在 Windows 上验证，macOS / Linux 如遇浏览器未自动打开，手动访问 http://localhost:5173 即可，游戏功能不受影响。
 - 本地大模型机器人需要你自行部署并开启 CORS；模型质量、速度、上下文长度直接影响决策质量，默认超时 60 秒，失败会回退本地算法。自动探测只扫描常见端口且要求服务允许 CORS，扫不到时请手动填写 Base URL。
 - 大模型对局记忆保存在浏览器 localStorage（每个槽位最多 120 条），清除浏览器数据会丢失；换浏览器/端口不共享。自动扫描未开放端口时，浏览器控制台会出现预期内的网络失败记录，不是应用报错。
 - 训练是「自博弈参数进化 + 经验 few-shot + 可选 SFT 数据集」，不会自动微调大模型；BB/100 指标受样本量影响波动较大，建议多轮训练并对比报告。

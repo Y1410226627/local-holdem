@@ -142,7 +142,7 @@ function checkEnvironment() {
     print('');
     print(`[失败] 当前 Node.js 版本 v${process.versions.node} 不受支持。`);
     print('       本项目需要 Node.js 22.12 或更高版本（推荐 24 LTS）。');
-    print('       请到 https://nodejs.org/zh-cn/download 安装后重新运行。');
+    print('       请到 https://nodejs.org/zh-cn/download 安装后重新运行（macOS 也可 brew install node）。');
     print('');
     print('SETUP_RESULT=FAIL');
     process.exit(1);
@@ -166,12 +166,18 @@ function printSummary() {
   print('启动游戏：');
   if (IS_WINDOWS) {
     print('  Windows：双击项目根目录的「启动德州扑克.bat」');
+  } else if (process.platform === 'darwin') {
+    print('  macOS  ：双击「启动德州扑克.command」，或运行 bash 启动德州扑克.sh');
+  } else {
+    print('  Linux  ：运行 bash 启动德州扑克.sh');
   }
   print('  命令行  ：npm run dev -- --open（浏览器打开 http://localhost:5173）');
   print('');
   print('训练机器人：');
   if (IS_WINDOWS) {
     print('  Windows：双击「训练机器人.bat」（先问轮数、估时，确认后开始）');
+  } else {
+    print('  macOS / Linux：npm run train（命令行；交互式训练器目前仅 Windows .bat）');
   }
   print('  命令行  ：npm run train:quick（约 2 秒）或 npm run train');
   print('');
