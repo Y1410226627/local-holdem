@@ -23,6 +23,7 @@ import {
   type DifficultyProfile,
 } from './difficulty';
 import { gtoBoundaryAdjust, gtoClosenessFor, gtoEvSizeChoice, gtoPushFoldAdvice } from './gto';
+import { depthLimitedSearch, estimateActionEv } from './search';
 import {
   applyChallengeVariant,
   buildChallengeRanges,
@@ -1004,6 +1005,34 @@ function decideChallengePostflop(
     }
   }
 
+  // 深度受限搜索（借鉴 DeepStack / Pluribus 的轻量版）：比较一步 EV，按接近度概率采用更优动作。
+  if (ctx.closeness >= 0.2) {
+    const searched = depthLimitedSearch({
+      view,
+      legal,
+      equity,
+      opponentCount,
+      foldToBetRate: opponents.avgFoldToBet,
+      timingWeak: weakSignals.weak,
+      closeness: ctx.closeness,
+    });
+    if (searched.length > 0 && rng() < ctx.closeness * 0.65) {
+      const heuristicEv = estimateActionEv({
+        action,
+        view,
+        legal,
+        equity,
+        opponentCount,
+        foldToBetRate: opponents.avgFoldToBet,
+      });
+      const best = searched[0];
+      if (heuristicEv === null || best.ev > heuristicEv + Math.max(1, view.pot) * 0.04) {
+        action = best.action;
+        note = note + '；深度受限搜索：选择' + best.label;
+      }
+    }
+  }
+
   const timingText =
     ctx.timingTells.length > 0
       ? ctx.timingTells
@@ -1437,6 +1466,9 @@ export async function decide(
   if (challenge) tags.push(challengeArchetypeLabel(archetypeId));
   if (!options.profileOverride && closeness >= 0.5) {
     tags.push('GTO ' + Math.round(closeness * 100) + '%');
+  }
+  if (!options.profileOverride && challenge && closeness >= 0.5) {
+    tags.push('搜索');
   }
   const moodTag = options.profileOverride ? null : moodLabel(mood);
   if (moodTag) tags.push(moodTag);

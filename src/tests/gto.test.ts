@@ -26,6 +26,8 @@ import {
   solvePushFold,
 } from '../ai/gto';
 import { CC, makeHand } from './helpers';
+import type { PlayerView } from '../game/playerView';
+import { depthLimitedSearch, estimateActionEv, multiwayCaution } from '../ai/search';
 
 const legalBase: LegalActions = {
   playerId: 1,
@@ -286,5 +288,121 @@ describe('gtoEvSizeChoice：尺度混合', () => {
     const mixed = gtoEvSizeChoice({ ...input, closeness: 1, rng: seqRng([0, 0.5]) });
     expect([0.33, 0.66, 1]).toContain(mixed.fraction);
     expect(mixed.note).toContain('GTO');
+  });
+});
+
+describe('深度受限搜索 + 多人谨慎（DeepStack / Pluribus 借鉴）', () => {
+  function searchView(pot = 100): PlayerView {
+    return { pot } as unknown as PlayerView;
+  }
+
+  const facingBetLegal = {
+    playerId: 1,
+    currentBet: 100,
+    callAmount: 100,
+    canFold: true,
+    canCheck: false,
+    canCall: true,
+    canBet: false,
+    canRaise: true,
+    canAllIn: false,
+    minRaiseTo: 200,
+    maxRaiseTo: 1000,
+    aggressiveType: 'raise',
+    raiseRights: true,
+    isAllInCall: false,
+  } as LegalActions;
+
+  it('多人谨慎系数随对手数递减', () => {
+    expect(multiwayCaution(1)).toBe(1);
+    expect(multiwayCaution(2)).toBeGreaterThan(multiwayCaution(3));
+    expect(multiwayCaution(3)).toBeGreaterThan(multiwayCaution(4));
+  });
+
+  it('正则型 CFR：迭代越多可利用度越低，且收敛到较低水平', () => {
+    const coarse = solvePushFold({ iterations: 80, bypassCache: true });
+    const fine = solvePushFold({ iterations: 4000, bypassCache: true });
+    expect(fine.exploitability).toBeLessThan(coarse.exploitability + 1e-9);
+    expect(fine.exploitability).toBeLessThan(0.1);
+  });
+
+  it('强牌可下注时搜索优先选择进攻动作', () => {
+    const legal = {
+      ...facingBetLegal,
+      currentBet: 0,
+      callAmount: 0,
+      canCheck: true,
+      canCall: false,
+      canRaise: false,
+      canBet: true,
+      aggressiveType: 'bet',
+    } as LegalActions;
+    const ranked = depthLimitedSearch({
+      view: searchView(),
+      legal,
+      equity: 0.9,
+      opponentCount: 1,
+      foldToBetRate: 0.5,
+      timingWeak: true,
+      closeness: 1,
+    });
+    expect(ranked.length).toBeGreaterThan(1);
+    expect(['bet', 'raise', 'allin']).toContain(ranked[0].action.type);
+  });
+
+  it('弱牌面对大注时搜索优先弃牌', () => {
+    const ranked = depthLimitedSearch({
+      view: searchView(100),
+      legal: facingBetLegal,
+      equity: 0.15,
+      opponentCount: 1,
+      foldToBetRate: 0,
+      closeness: 1,
+    });
+    expect(ranked[0].action.type).toBe('fold');
+    expect(ranked[0].ev).toBe(0);
+  });
+
+  it('相同输入搜索结果确定，EV 按降序排列', () => {
+    const input = {
+      view: searchView(120),
+      legal: facingBetLegal,
+      equity: 0.45,
+      opponentCount: 1,
+      foldToBetRate: 0.45,
+      closeness: 1,
+    };
+    const first = depthLimitedSearch(input);
+    const second = depthLimitedSearch(input);
+    expect(second.map((candidate) => candidate.action)).toEqual(
+      first.map((candidate) => candidate.action),
+    );
+    for (let index = 1; index < first.length; index++) {
+      expect(first[index].ev).toBeLessThanOrEqual(first[index - 1].ev);
+    }
+  });
+
+  it('estimateActionEv 与搜索口径一致：弃牌为 0、跟注/过牌可估算', () => {
+    const view = searchView(100);
+    expect(
+      estimateActionEv({
+        action: { type: 'fold' },
+        view,
+        legal: facingBetLegal,
+        equity: 0.3,
+        opponentCount: 1,
+        foldToBetRate: 0.4,
+      }),
+    ).toBe(0);
+    const callEv = estimateActionEv({
+      action: { type: 'call' },
+      view,
+      legal: facingBetLegal,
+      equity: 0.3,
+      opponentCount: 1,
+      foldToBetRate: 0.4,
+    });
+    expect(callEv).not.toBeNull();
+    expect(Number.isFinite(callEv!)).toBe(true);
   });
 });

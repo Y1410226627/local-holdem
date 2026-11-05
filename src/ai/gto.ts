@@ -251,8 +251,16 @@ export interface PushFoldOptions {
  * SB（按钮）可选 push / fold；BB 面对 push 可选 call / fold；
  * 全下后直接按桶间胜率摊牌。返回平均策略与可利用度。
  */
+/**
+ * 用「阈值纯策略 + 正则型 CFR」求解抽象 push/fold 游戏：
+ * - SB 纯策略按阈值 t：对强度桶 >= t 全下（t = buckets 表示全部弃牌）；
+ * - BB 纯策略按阈值 c：对强度桶 >= c 跟注（c = buckets 表示全部弃牌）。
+ * 在 11×11 的矩阵博弈上跑 CFR（遗憾匹配 + CFR+ 裁剪 + 线性加权平均），
+ * 得到混合阈值策略；按桶边际得到「越强越常推 / 跟」的频率。
+ * 这是带抽象（10 桶、阈值结构）的近似纳什解，可利用度仍 > 0。
+ */
 export function solvePushFold(options: PushFoldOptions = {}): PushFoldSolution {
-  const iterations = Math.max(10, Math.floor(options.iterations ?? 1500));
+  const iterations = Math.max(10, Math.floor(options.iterations ?? 2000));
   const stackBB = options.stackBB ?? PUSH_FOLD_STACK_BB;
   const cacheKey = stackBB + ':' + iterations;
   if (!options.bypassCache && pushFoldCache.has(cacheKey)) {
@@ -260,78 +268,112 @@ export function solvePushFold(options: PushFoldOptions = {}): PushFoldSolution {
   }
   const { equity, buckets } = buildEquityMatrix();
   const { boundaries } = buildBucketTable();
-  const sbRegret: number[][] = Array.from({ length: buckets }, () => [0, 0]);
-  const bbRegret: number[][] = Array.from({ length: buckets }, () => [0, 0]);
-  const sbStrategySum: number[][] = Array.from({ length: buckets }, () => [0, 0]);
-  const bbStrategySum: number[][] = Array.from({ length: buckets }, () => [0, 0]);
+  const actionCount = buckets + 1; // 阈值 0..buckets
 
-  // CFR+：遗憾值裁剪到 0、线性加权平均；先更新 SB，再用更新后的 SB 策略更新 BB。
-  for (let iteration = 1; iteration <= iterations; iteration++) {
-    const weight = iteration;
-    const sbStrategies: number[][] = [];
-    const bbStrategies: number[][] = [];
-    for (let index = 0; index < buckets; index++) {
-      sbStrategies.push(regretMatching(sbRegret[index]));
-      bbStrategies.push(regretMatching(bbRegret[index]));
-    }
-    // SB 更新：SB 桶 i 对 BB 各桶等概率，BB 使用当前平均策略。
-    for (let i = 0; i < buckets; i++) {
-      const sbStrategy = sbStrategies[i];
-      let evPush = 0;
-      for (let j = 0; j < buckets; j++) {
-        const callPayoff = stackBB * (2 * equity[i][j] - 1);
-        const bbStrategy = bbStrategies[j];
-        evPush += bbStrategy[1] * callPayoff + bbStrategy[0] * 1;
-      }
-      const evFold = -0.5 * buckets;
-      const evSum = sbStrategy[0] * evFold + sbStrategy[1] * evPush;
-      sbRegret[i][0] = Math.max(0, sbRegret[i][0] + (evFold - evSum));
-      sbRegret[i][1] = Math.max(0, sbRegret[i][1] + (evPush - evSum));
-      sbStrategySum[i][0] += weight * sbStrategy[0];
-      sbStrategySum[i][1] += weight * sbStrategy[1];
-    }
-    // BB 更新：对每个 BB 桶 j，SB 各桶的到达概率 = 其当前 push 频率。
-    for (let j = 0; j < buckets; j++) {
-      const bbStrategy = bbStrategies[j];
-      let pushReach = 0;
-      let foldCounterfactual = 0;
-      let callCounterfactual = 0;
-      let strategyCounterfactual = 0;
+  // 预计算阈值策略的收益矩阵：matrix[sbThreshold][bbThreshold] = SB 期望。
+  const matrix: number[][] = Array.from({ length: actionCount }, () =>
+    new Array<number>(actionCount).fill(0),
+  );
+  for (let t = 0; t < actionCount; t++) {
+    for (let c = 0; c < actionCount; c++) {
+      let total = 0;
       for (let i = 0; i < buckets; i++) {
-        const pushProbability = sbStrategies[i][1];
-        pushReach += pushProbability;
-        const callPayoff = stackBB * (2 * equity[i][j] - 1);
-        const foldValue = pushProbability * -1 + (1 - pushProbability) * 0.5;
-        const callValue = pushProbability * -callPayoff + (1 - pushProbability) * 0.5;
-        foldCounterfactual += foldValue;
-        callCounterfactual += callValue;
-        strategyCounterfactual += bbStrategy[0] * foldValue + bbStrategy[1] * callValue;
+        for (let j = 0; j < buckets; j++) {
+          const sbPushes = i >= t;
+          const bbCalls = j >= c;
+          if (!sbPushes) {
+            total += -0.5;
+          } else if (bbCalls) {
+            total += stackBB * (2 * equity[i][j] - 1);
+          } else {
+            total += 1;
+          }
+        }
       }
-      pushReach /= buckets;
-      bbRegret[j][0] = Math.max(0, bbRegret[j][0] + (foldCounterfactual - strategyCounterfactual));
-      bbRegret[j][1] = Math.max(0, bbRegret[j][1] + (callCounterfactual - strategyCounterfactual));
-      bbStrategySum[j][0] += weight * bbStrategy[0];
-      bbStrategySum[j][1] += weight * bbStrategy[1];
+      matrix[t][c] = total / (buckets * buckets);
     }
   }
 
+  const sbRegret = new Array<number>(actionCount).fill(0);
+  const bbRegret = new Array<number>(actionCount).fill(0);
+  const sbSum = new Array<number>(actionCount).fill(0);
+  const bbSum = new Array<number>(actionCount).fill(0);
+
+  for (let iteration = 1; iteration <= iterations; iteration++) {
+    const sbStrategy = regretMatching(sbRegret);
+    const bbStrategy = regretMatching(bbRegret);
+    const sbEv = new Array<number>(actionCount).fill(0);
+    for (let t = 0; t < actionCount; t++) {
+      let value = 0;
+      for (let c = 0; c < actionCount; c++) value += matrix[t][c] * bbStrategy[c];
+      sbEv[t] = value;
+    }
+    const sbValue = sbEv.reduce((sum, value, index) => sum + value * sbStrategy[index], 0);
+    for (let t = 0; t < actionCount; t++) {
+      sbRegret[t] = Math.max(0, sbRegret[t] + (sbEv[t] - sbValue));
+      sbSum[t] += iteration * sbStrategy[t];
+    }
+    const bbEv = new Array<number>(actionCount).fill(0);
+    for (let c = 0; c < actionCount; c++) {
+      let value = 0;
+      for (let t = 0; t < actionCount; t++) value += -matrix[t][c] * sbStrategy[t];
+      bbEv[c] = value;
+    }
+    const bbValue = -sbValue;
+    for (let c = 0; c < actionCount; c++) {
+      bbRegret[c] = Math.max(0, bbRegret[c] + (bbEv[c] - bbValue));
+      bbSum[c] += iteration * bbStrategy[c];
+    }
+  }
+
+  const normalize = (values: readonly number[]): number[] => {
+    const total = values.reduce((sum, value) => sum + value, 0);
+    if (total <= 1e-12) return values.map(() => 1 / values.length);
+    return values.map((value) => value / total);
+  };
+  const sbThresholdMix = normalize(sbSum);
+  const bbThresholdMix = normalize(bbSum);
   const sbPushFrequency: number[] = [];
   const bbCallFrequency: number[] = [];
-  for (let i = 0; i < buckets; i++) {
-    const sbTotal = sbStrategySum[i][0] + sbStrategySum[i][1];
-    sbPushFrequency.push(sbTotal > 0 ? sbStrategySum[i][1] / sbTotal : 0.5);
-    const bbTotal = bbStrategySum[i][0] + bbStrategySum[i][1];
-    bbCallFrequency.push(bbTotal > 0 ? bbStrategySum[i][1] / bbTotal : 0);
+  for (let bucket = 0; bucket < buckets; bucket++) {
+    // 阈值 t <= bucket 的策略都会推这个桶 → 边际全下频率。
+    sbPushFrequency.push(
+      sbThresholdMix.slice(0, bucket + 1).reduce((sum, weight) => sum + weight, 0),
+    );
+    bbCallFrequency.push(
+      bbThresholdMix.slice(0, bucket + 1).reduce((sum, weight) => sum + weight, 0),
+    );
   }
-  const monotonePush = isotonicIncreasing(sbPushFrequency);
-  const monotoneCall = isotonicIncreasing(bbCallFrequency);
-  const exploitability = estimateExploitability(monotonePush, monotoneCall, equity, stackBB);
+
+  // 矩阵博弈的可利用度（阈值策略空间内）：
+  const expectedSb = (sbMixed: number[], bbMixed: number[]): number => {
+    let value = 0;
+    for (let t = 0; t < actionCount; t++) {
+      for (let c = 0; c < actionCount; c++) value += sbMixed[t] * bbMixed[c] * matrix[t][c];
+    }
+    return value;
+  };
+  const value = expectedSb(sbThresholdMix, bbThresholdMix);
+  let bestSb = -Infinity;
+  for (let t = 0; t < actionCount; t++) {
+    let row = 0;
+    for (let c = 0; c < actionCount; c++) row += matrix[t][c] * bbThresholdMix[c];
+    bestSb = Math.max(bestSb, row);
+  }
+  let bestBb = -Infinity;
+  for (let c = 0; c < actionCount; c++) {
+    let column = 0;
+    for (let t = 0; t < actionCount; t++) column += -matrix[t][c] * sbThresholdMix[t];
+    bestBb = Math.max(bestBb, column);
+  }
+  const exploitability = Math.max(0, bestSb - value) + Math.max(0, bestBb + value);
+
   const solution: PushFoldSolution = {
     buckets,
     stackBB,
     iterations,
-    sbPushFrequency: monotonePush,
-    bbCallFrequency: monotoneCall,
+    sbPushFrequency,
+    bbCallFrequency,
     boundaries,
     exploitability,
   };
@@ -340,76 +382,6 @@ export function solvePushFold(options: PushFoldOptions = {}): PushFoldSolution {
 }
 
 const pushFoldCache = new Map<string, PushFoldSolution>();
-
-/** 保序回归（相邻递增）：把噪声频率投影为随牌力单调不减的策略。 */
-function isotonicIncreasing(values: readonly number[]): number[] {
-  const result = values.slice();
-  for (let index = 1; index < result.length; index++) {
-    if (result[index] < result[index - 1]) result[index] = result[index - 1];
-  }
-  return result;
-}
-
-function estimateExploitability(
-  sbPush: readonly number[],
-  bbCall: readonly number[],
-  equity: readonly number[][],
-  stackBB: number,
-): number {
-  const buckets = sbPush.length;
-  const uniform = 1 / buckets;
-  const evAgainstSb = (i: number, sbPushStrategy: readonly number[], bbCallStrategy: readonly number[]): number => {
-    // 给定 SB 策略与 BB 策略下 SB 的期望（均匀权重）。
-    let total = 0;
-    for (let j = 0; j < buckets; j++) {
-      const callPayoff = stackBB * (2 * equity[i][j] - 1);
-      const evPush = bbCallStrategy[j] * callPayoff + (1 - bbCallStrategy[j]) * 1;
-      total += sbPushStrategy[i] * evPush + (1 - sbPushStrategy[i]) * -0.5;
-    }
-    return total / buckets;
-  };
-  const value = (() => {
-    let total = 0;
-    for (let i = 0; i < buckets; i++) {
-      for (let j = 0; j < buckets; j++) {
-        const callPayoff = stackBB * (2 * equity[i][j] - 1);
-        const evPush = bbCall[j] * callPayoff + (1 - bbCall[j]) * 1;
-        total += sbPush[i] * evPush + (1 - sbPush[i]) * -0.5;
-      }
-    }
-    return total / (buckets * buckets);
-  })();
-  // SB 最佳响应
-  let brSb = -Infinity;
-  for (let i = 0; i < buckets; i++) {
-    let foldEv = 0;
-    let pushEv = 0;
-    for (let j = 0; j < buckets; j++) {
-      foldEv += -0.5;
-      const callPayoff = stackBB * (2 * equity[i][j] - 1);
-      pushEv += bbCall[j] * callPayoff + (1 - bbCall[j]) * 1;
-    }
-    brSb = Math.max(brSb, Math.max(foldEv, pushEv) / buckets);
-  }
-  // BB 最佳响应（对 SB 的平均策略）
-  let brBb = -Infinity;
-  let pushWeight = 0;
-  for (let i = 0; i < buckets; i++) pushWeight += sbPush[i] / buckets;
-  for (let j = 0; j < buckets; j++) {
-    let foldEv = 0;
-    let callEv = 0;
-    for (let i = 0; i < buckets; i++) {
-      const callPayoff = stackBB * (2 * equity[i][j] - 1);
-      foldEv += sbPush[i] * -1 + (1 - sbPush[i]) * 0.5;
-      callEv += sbPush[i] * -callPayoff + (1 - sbPush[i]) * 0.5;
-    }
-    brBb = Math.max(brBb, Math.max(foldEv, callEv) / buckets);
-  }
-  void uniform;
-  // BB 的 BR 收益换算成 SB 视角的损失。
-  const sbLossFromBbBr = brBb + value; // BB BR EV - BB 在均衡下的 EV(=-value)
-  return Math.max(0, brSb - value) + Math.max(0, sbLossFromBbBr);
-}
 
 export interface PushFoldAdvice {
   action: 'push' | 'fold' | 'call';
