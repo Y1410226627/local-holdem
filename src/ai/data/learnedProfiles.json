@@ -1,0 +1,101 @@
+{
+  "generatedAt": "2026-11-04T16:40:25.692Z",
+  "hands": 11976480,
+  "seed": "local-selfplay-v1",
+  "profiles": {
+    "beginner": {
+      "preflop": {
+        "play": 0.3,
+        "raise": 0.866,
+        "threeBet": 0.967,
+        "bluffRaiseRate": 0.066,
+        "mixRaiseRate": 0.459,
+        "trapRate": 0.227
+      },
+      "postflop": {
+        "bluffRate": 0.01,
+        "semiBluffRate": 0,
+        "valueThreshold": 0.547,
+        "callMargin": 0
+      }
+    },
+    "normal": {
+      "preflop": {
+        "play": 0.64,
+        "raise": 0.81,
+        "threeBet": 0.975,
+        "bluffRaiseRate": 0.088,
+        "mixRaiseRate": 0.028,
+        "trapRate": 0.128
+      },
+      "postflop": {
+        "bluffRate": 0.156,
+        "semiBluffRate": 0.239,
+        "valueThreshold": 0.578,
+        "callMargin": 0.114
+      }
+    },
+    "hard": {
+      "preflop": {
+        "play": 0.715,
+        "raise": 0.768,
+        "threeBet": 0.928,
+        "bluffRaiseRate": 0.12,
+        "mixRaiseRate": 0.224,
+        "trapRate": 0.19
+      },
+      "postflop": {
+        "bluffRate": 0.256,
+        "semiBluffRate": 0.435,
+        "valueThreshold": 0.698,
+        "callMargin": 0.12
+      }
+    },
+    "expert": {
+      "preflop": {
+        "play": 0.78,
+        "raise": 0.911,
+        "threeBet": 0.931,
+        "bluffRaiseRate": 0.245,
+        "mixRaiseRate": 0.329,
+        "trapRate": 0.198
+      },
+      "postflop": {
+        "bluffRate": 0.214,
+        "semiBluffRate": 0.623,
+        "valueThreshold": 0.62,
+        "callMargin": 0.12
+      }
+    }
+  },
+  "metrics": {
+    "beginner": {
+      "baselineBB100": 15.167,
+      "trainedBB100": 15.792,
+      "acceptedMutations": 845,
+      "rounds": 10000,
+      "hands": 2642520
+    },
+    "normal": {
+      "baselineBB100": 748.875,
+      "trainedBB100": 940.542,
+      "acceptedMutations": 2253,
+      "rounds": 10000,
+      "hands": 3106800
+    },
+    "hard": {
+      "baselineBB100": -846.229,
+      "trainedBB100": -525.687,
+      "acceptedMutations": 2209,
+      "rounds": 10000,
+      "hands": 3108120
+    },
+    "expert": {
+      "baselineBB100": -1129.333,
+      "trainedBB100": 187.729,
+      "acceptedMutations": 2342,
+      "rounds": 10000,
+      "hands": 3119040
+    }
+  }
+}
