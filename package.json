@@ -1,7 +1,7 @@
 {
   "name": "local-holdem",
   "private": true,
-  "version": "0.12.5",
+  "version": "0.13.0",
   "description": "本地人机无限注德州扑克：纯前端规则引擎 + 本地算法 AI，零网络、零付费服务",
   "type": "module",
   "scripts": {

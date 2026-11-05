@@ -43,10 +43,10 @@ const MOOD_SUSCEPTIBILITY: Record<Difficulty, number> = {
 };
 
 const MISTAKE_RATE: Record<Difficulty, number> = {
-  beginner: 0.22,
-  normal: 0.1,
-  hard: 0.04,
-  expert: 0.01,
+  beginner: 0.15,
+  normal: 0.07,
+  hard: 0.025,
+  expert: 0.005,
 };
 
 function clamp(value: number, min: number, max: number): number {

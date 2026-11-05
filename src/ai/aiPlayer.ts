@@ -78,6 +78,8 @@ export interface AIDecisionOptions {
    * 训练 / 对照评估时忽略（profileOverride 优先）。
    */
   challenge?: boolean;
+  /** 关闭随机失误层（挑战专家基准用）。 */
+  noMistakes?: boolean;
   /**
    * 训练 / 回放用：强制使用指定的难度档位（不读取全局难度配置与训练覆盖）。
    * 自博弈训练脚本用它评估候选参数。
@@ -1487,7 +1489,7 @@ async function decideCore(
   }
 
   // 真人化失误层：低概率的人类式偏差（入门 > 普通 > 困难 > 专家）；训练 / 对照评估时关闭；挑战模式不犯错。
-  if (!isPreflop && !options.profileOverride && !challenge) {
+  if (!isPreflop && !options.profileOverride && !challenge && !options.noMistakes) {
     const mistake = maybeHumanMistake(ctx, action, variationReference, analysisHasDraw);
     if (mistake) {
       action = mistake.action;
@@ -1573,11 +1575,25 @@ function pickChallengeDecision(
   expertDecision: AIDecision,
   opponents: OpponentSummary,
 ): AIDecision {
-  void view; void legal; void opponents;
-  // 10k 配对基准显示：实验性挑战策略在默认参数下弱于专家线。
-  // 因此动作以专家基准为准（保证不弱于专家档），挑战读人 / 计时 / 原型信息保留在调试展示。
+  void legal;
+  // 动作以专家基准为准（保证不弱于专家档）；对“跟注站 / 松被动”对手关闭纯诈唬。
+  let finalAction = expertDecision.action;
+  let exploitNote = '';
+  const aggressive =
+    finalAction.type === 'bet' || finalAction.type === 'raise' || finalAction.type === 'allin';
+  const station = (opponents.avgVpip ?? 0) > 0.52 && (opponents.avgFoldToBet ?? 1) < 0.35;
+  const equity = expertDecision.debug.equity ?? challengeDecision.debug.equity ?? 0.5;
+  if (aggressive && station && equity < 0.58) {
+    if (view.legal?.canCheck) {
+      finalAction = { type: 'check' };
+      exploitNote = '（对手跟注过多：放弃诈唬，过牌控池）';
+    } else if (view.legal?.canCall) {
+      finalAction = { type: 'call' };
+      exploitNote = '（对手跟注过多：放弃诈唬加注，跟注控池）';
+    }
+  }
   return {
-    action: expertDecision.action,
+    action: finalAction,
     timingHint: challengeDecision.timingHint ?? expertDecision.timingHint,
     debug: {
       ...expertDecision.debug,
@@ -1585,7 +1601,7 @@ function pickChallengeDecision(
       archetype: challengeDecision.debug.archetype,
       timing: challengeDecision.debug.timing,
       profile: expertDecision.debug.profile + ' · ' + (challengeDecision.debug.archetype ?? '挑战宗师') + ' · 专家基准动作 · GTO 92%',
-      reasoning: '挑战（专家基准动作）：' + expertDecision.debug.reasoning + '｜挑战分析：' + challengeDecision.debug.reasoning,
+      reasoning: '挑战（专家基准动作）：' + expertDecision.debug.reasoning + exploitNote + '｜挑战分析：' + challengeDecision.debug.reasoning,
     },
   };
 }
@@ -1604,6 +1620,7 @@ export async function decide(
   const expertDecision = await decideCore(view, difficulty, {
     ...options,
     challenge: false,
+    noMistakes: true,
     maxIterations: options.maxIterations ?? 6000,
   });
   return pickChallengeDecision(view, legal, challengeDecision, expertDecision, opponents);
