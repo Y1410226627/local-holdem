@@ -2,8 +2,9 @@
 # 本地人机德州扑克 · 一键启动（macOS / Linux 终端版）
 #
 # 用法：
-#   bash 启动德州扑克.sh              # 启动本地服务并打开浏览器
-#   bash 启动德州扑克.sh --no-open    # 只启动本地服务，不打开浏览器
+#   bash 启动德州扑克.sh                # 启动本地服务并打开浏览器
+#   bash 启动德州扑克.sh --no-open      # 只启动本地服务，不打开浏览器
+#   bash 启动德州扑克.sh --install-node # 缺少 Node.js 时自动安装（macOS 需管理员密码）
 #
 # macOS 用户也可以直接双击「启动德州扑克.command」。
 set -u
@@ -12,21 +13,35 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$DIR" || exit 1
 
 NO_OPEN=0
-if [ "${1:-}" = "--no-open" ]; then
-  NO_OPEN=1
-fi
+AGENT_MODE=0
+INSTALL_NODE=0
+for arg in "$@"; do
+  case "$arg" in
+    --no-open) NO_OPEN=1 ;;
+    --agent|--yes|-y) AGENT_MODE=1 ;;
+    --install-node) INSTALL_NODE=1 ;;
+  esac
+done
+
+# shellcheck source=scripts/launcher-common.sh
+. "$DIR/scripts/launcher-common.sh"
 
 echo "============================================"
 echo "   本地人机德州扑克  一键启动"
 echo "============================================"
 echo
 
-if ! command -v node >/dev/null 2>&1; then
-  echo "[错误] 未找到 Node.js，请先安装 Node.js 22.12 或更高版本（推荐 24 LTS）："
-  echo "       https://nodejs.org/zh-cn/download"
-  echo "       macOS 也可以用 Homebrew：brew install node"
-  echo
-  read -r -p "按回车键退出..." _ || true
+NODE_MODE=ask
+if [ "$INSTALL_NODE" -eq 1 ]; then
+  NODE_MODE=auto
+elif [ "$AGENT_MODE" -eq 1 ]; then
+  NODE_MODE=never
+fi
+
+if ! holdem_ensure_node "$NODE_MODE"; then
+  if [ "$AGENT_MODE" -eq 0 ]; then
+    read -r -p "按回车键退出..." _ || true
+  fi
   exit 1
 fi
 

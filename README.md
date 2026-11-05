@@ -26,7 +26,8 @@
 ### 环境要求
 
 - Node.js **22.12+**（推荐 24 LTS）与 npm 10+；本项目在 Node.js 24 / npm 11 下验证。
-- 只有安装 npm 依赖需要联网，游戏本身纯本地运行、不调用任何外部 API。
+- **没装 Node.js 也没关系**：双击「一键安装」时脚本会先检查本机；已经装了 Node.js 就直接跳过（不会重复安装），确实没有才会询问并自动下载官方 LTS 安装（Windows 弹 UAC 管理员授权；macOS 需输入 Mac 登录密码）。Linux 因发行版差异较大，只给出安装指引。
+- 只有安装 npm 依赖和自动安装 Node.js 需要联网，游戏本身纯本地运行、不调用任何外部 API。
 - 支持 Windows 10/11、macOS（Intel / Apple Silicon）与主流 Linux 桌面版；浏览器为 Edge / Chrome / Firefox 最新版。
 
 ### 方式一：一键配置（首次使用）
@@ -42,10 +43,10 @@ bash 一键安装.sh --agent    # 非交互，适合自动化
 
 无论哪种方式都会：
 
-- 自动检查 Node.js / npm 版本；
-- 安装依赖 → 运行全部测试 → TypeScript 类型检查 + 生产构建自检（全部通过才算配置成功）；
+- **先检查本机 Node.js**：已有就直接继续（不会重复安装）；没有才询问是否自动安装官方 LTS（`--install-node` 可免询问直接安装）；
+- 加载项目后安装 npm 依赖 → 运行全部测试 → TypeScript 类型检查 + 生产构建自检（全部通过才算配置成功）；
 - 完成后询问是否立即启动游戏（`Y` 直接开局）；
-- 支持 `--agent`：不提问、不启动浏览器，适合交给 AI Agent / CI。
+- 支持 `--agent`：不提问、不启动浏览器；无人值守模式下**不会**自动安装 Node.js（缺 Node 时退出并提示，避免擅自修改系统），适合交给 AI Agent / CI。
 
 ### 方式二：一键启动（日常使用）
 
@@ -53,7 +54,7 @@ bash 一键安装.sh --agent    # 非交互，适合自动化
 - **macOS**：双击 **`启动德州扑克.command`**；
 - **Linux**：`bash 启动德州扑克.sh`。
 
-首次运行自动检查环境并安装依赖（需要联网，约 1-2 分钟）；自动启动本地服务并打开浏览器（http://localhost:5173）；再次运行时若检测到服务已在运行，只打开浏览器，不会重复启动；关闭终端窗口或按 Ctrl+C 停止服务。
+首次运行自动检查环境并安装依赖（需要联网，约 1-2 分钟）；若本机没有 Node.js，会先询问并自动安装官方 LTS（已有则直接跳过），然后自动启动本地服务并打开浏览器（http://localhost:5173）；再次运行时若检测到服务已在运行，只打开浏览器，不会重复启动；关闭终端窗口或按 Ctrl+C 停止服务。
 
 ### 方式三：命令行
 
@@ -72,7 +73,10 @@ npm run build    # TypeScript 类型检查 + 生产构建（输出 dist/）
 ```bash
 node scripts/setup.mjs --agent   # 成功时 exit 0，最后一行输出 SETUP_RESULT=OK
 # macOS / Linux 也可以：bash 一键安装.sh --agent
+# 无人值守模式默认不会自动安装 Node.js；确实需要时加：--install-node
 ```
+
+> `--install-node`：检测不到 Node.js 时免询问直接安装（Windows 官方 MSI + UAC / macOS 官方 pkg + 密码）。本机已有 Node.js 时该参数不会产生任何安装动作。
 
 更完整的 Agent 约束、修改指南与验收清单见 [AGENTS.md](AGENTS.md)。
 
@@ -405,7 +409,9 @@ local-holdem
 │  ├─ REPORT.md                 # 最近一次自博弈训练报告
 │  └─ llm-sft-dataset.jsonl     # 大模型机器人可选微调数据集（JSONL）
 ├─ scripts/
-│  ├─ setup.mjs                 # 一键配置脚本（跨平台，支持 --agent 非交互）
+│  ├─ setup.mjs                 # 一键配置脚本（跨平台，支持 --agent / --check）
+│  ├─ install-node.ps1          # Windows：检测/下载/安装官方 Node.js LTS（Ask/Auto/Check）
+│  ├─ launcher-common.sh        # macOS/Linux：检测 Node.js，缺失时官方 pkg 自动安装（可用 Homebrew 备选）
 │  └─ train.ts                  # 自博弈训练 + 参数进化 + 经验库 / SFT 生成
 ├─ src
 │  ├─ main.tsx
@@ -485,6 +491,7 @@ npm test
 
 - [x] `npm install` / `npm test` / `npm run build` 通过
 - [x] 一键配置：`node scripts/setup.mjs --agent` 完成环境检查 + 安装 + 测试 + 构建自检，成功输出 `SETUP_RESULT=OK`；[AGENTS.md](AGENTS.md) 可交给 AI Agent 直接执行
+- [x] 一键配置会**先检查本机 Node.js**：已有则跳过；缺失时才询问并自动安装官方 LTS（Windows MSI + UAC / macOS pkg + 密码），`--install-node` 可免询问；无人值守 `--agent` 默认不安装
 - [x] `npm run dev` 可启动，首次进入先教程、大厅开局，可完整游玩多手牌
 - [x] 4 档难度可选，行为有可观察差异
 - [x] 人类可完成所有合法动作，非法动作禁用
@@ -503,9 +510,11 @@ npm test
 | `npx tsc --noEmit` | 通过，0 错误 |
 | `npm test` | 16 个测试文件、213 个测试全部通过（约 1–2s） |
 | `npm run build` | 通过：53 modules，JS 402.01 kB（gzip 114.98 kB）、CSS 47.61 kB，训练数据已打包 |
-| `node scripts/setup.mjs --agent`（一键配置） | 退出码 0、最后一行 `SETUP_RESULT=OK`；环境检查 Node v24.19.0 / npm 11.17.0 → 安装依赖 → 213 个测试通过 → 构建 53 modules；`一键安装.bat --agent` 同样 exit 0 |
+| `node scripts/setup.mjs --agent`（一键配置） | 退出码 0、最后一行 `SETUP_RESULT=OK`；环境检查 Node v26.13.0 / npm 11.20.0 → 安装依赖 → 213 个测试通过 → 构建 53 modules；`一键安装.bat --agent` 同样 exit 0 |
 | `启动德州扑克.bat` / `训练机器人.bat` 冒烟 | 启动器：检测环境 → 起服务 → `http://localhost:5173` 返回 200（含 `#root`）→ 停止后端口释放；训练入口：`--rounds=0` 被拒绝 exit 1，环境检查通过 |
 | macOS / Linux 启动脚本（Git Bash 5.3 冒烟） | 4 个 `.sh` / `.command` 语法检查通过（兼容 macOS 自带 bash 3.2）；`bash 一键安装.sh --agent` exit 0、输出 `SETUP_RESULT=OK`；`bash 启动德州扑克.sh --no-open` 起服务返回 200 后停止；安装后输入 `n` 正确跳过启动；`.command` 已在 git 索引标记可执行位 |
+| Node.js 自动安装（Windows，`install-node.ps1`） | `-Mode Check`：正确识别本机 Node v26.13.0，架构 x64、官方 LTS v26.13.0、官方 MSI 地址 HTTP 200（约 34.9 MB）、非管理员时走 UAC 提权；`where node` 已命中时**不触发任何安装**（`--install-node` 也直接跳过）；缺 Node + `--agent`：两个 `.bat` 均 exit 1 且不安装；交互询问回答 `n` 正确取消、不下载 |
+| Node.js 自动安装（macOS/Linux，`launcher-common.sh` 单测） | ask / auto / never 三种模式、安装失败回退、“已有 Node 直接静默跳过”、LTS 解析（本地样例 + 真实 nodejs.org `index.json` = v26.13.0）共 10 项断言全部通过；`--agent` 缺 Node 时不安装并 exit 1 |
 | `npm run train -- --rounds=10 --seed=demo-b`（16 worker 并行） | 约 2.5 秒，14520 手，3/4 档参数更新（接受 6 个变异），生成 160 条 few-shot 与 119 行 SFT |
 | `训练机器人.bat` 交互 / 无人值守 | 轮数 1–10000（默认 2）→ 预计耗时 + 文件大小增量 → `Y/N` 确认；`--yes --rounds=100` 无人值守 exit 0；`--rounds=1000000` 被拒绝 exit 1 |
 | 多核并行加速 | 同 seed 实测：2 轮 3.3s→1.1s、10 轮 10.8s→2.3s；100 轮 16 worker 实测 13.1 秒（120,360 手，接受 65 个变异）；并行与单线程 profiles/metrics/经验库/SFT 一致 |
@@ -553,6 +562,7 @@ git remote add origin https://github.com/<你的用户名>/<仓库名>.git
 
 - 桌面浏览器优先（建议宽度 ≥ 1200px；1440×900 下页面需少量纵向滚动，人类行动时操作区会自动滚入视野），未专门适配手机触摸布局。
 - macOS / Linux 提供 `.command` / `.sh` 启动器，功能与 Windows `.bat` 一致；本项目主要在 Windows 上验证，macOS / Linux 如遇浏览器未自动打开，手动访问 http://localhost:5173 即可，游戏功能不受影响。
+- **自动安装 Node.js 的限制**：需要联网和本机管理员权限（Windows 会弹 UAC，macOS 要输入登录密码），公司电脑 / 标准用户可能被策略拦截，失败时会自动回退到手动安装指引；Node.js 只在本机确实没有时才安装，已有则跳过、不会覆盖或升级旧版本（版本过低时请手动升级）；Linux 因发行版差异暂不自动安装。
 - 本地大模型机器人需要你自行部署并开启 CORS；模型质量、速度、上下文长度直接影响决策质量，默认超时 60 秒，失败会回退本地算法。自动探测只扫描常见端口且要求服务允许 CORS，扫不到时请手动填写 Base URL。
 - 大模型对局记忆保存在浏览器 localStorage（每个槽位最多 120 条），清除浏览器数据会丢失；换浏览器/端口不共享。自动扫描未开放端口时，浏览器控制台会出现预期内的网络失败记录，不是应用报错。
 - 训练是「自博弈参数进化 + 经验 few-shot + 可选 SFT 数据集」，不会自动微调大模型；BB/100 指标受样本量影响波动较大，建议多轮训练并对比报告。

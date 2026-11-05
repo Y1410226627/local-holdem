@@ -9,8 +9,13 @@
 ## 环境要求
 
 - Node.js **22.12+**（推荐 24 LTS；Vite 8 与 Vitest 5 的 engines 要求），npm 10+。
-- 支持 Windows / macOS / Linux；仅安装 npm 依赖时需要联网。
+- 支持 Windows / macOS / Linux；仅安装 npm 依赖、自动安装 Node.js 时需要联网。
 - 硬件无特殊要求：双核 + 4 GB 内存即可游玩，**不需要独立显卡**；只有可选的本地大模型机器人需要显存 / 内存（详见 README「推荐硬件配置」）。
+- **Node.js 自动安装行为（重要）**：启动器会先检查本机；已有 Node.js 就直接跳过、绝不重复安装或升级；只有确实没有时才询问并自动安装官方 LTS。
+  - Windows：`scripts/install-node.ps1`（下载 nodejs.org 官方 MSI + msiexec，会弹 UAC 管理员授权）。
+  - macOS：`scripts/launcher-common.sh`（下载官方 pkg + `sudo installer`，需输入 Mac 登录密码；失败回退 Homebrew）。
+  - Linux：发行版差异大，只给手动安装指引，不自动安装。
+  - `--install-node`：缺 Node 时免询问直接安装；`--agent` 无人值守模式**默认不自动安装**（缺 Node 时 exit 1 并提示），避免 Agent 擅自修改系统。
 
 ## 一键安装（推荐，非交互）
 
@@ -24,6 +29,7 @@ node scripts/setup.mjs --agent
 - 各平台等价入口（都不会暂停、不会打开浏览器）：
   - Windows：`一键安装.bat --agent`
   - macOS / Linux：`bash 一键安装.sh --agent`（macOS 也可双击 `一键安装.command`）
+- `--install-node`：本机缺 Node.js 时免询问自动安装（已有 Node 时不做任何安装动作）；无人值守环境需要自动装 Node 时才加，CI 建议预装 Node 后直接用 `--agent`。
 
 其他选项：
 
@@ -72,6 +78,8 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 | `src/ai/` | 四档难度、范围模型、蒙特卡洛胜率、大模型机器人、训练参数；`data/` 为训练产物 |
 | `src/ui/` | React 界面（教程、大厅、牌桌、设置栏、调试面板、历史回放） |
 | `src/tests/` | Vitest 测试（16 个文件 / 213 个用例） |
+| `scripts/setup.mjs` | 一键配置：安装依赖 → 测试 → 构建自检（`--agent` / `--check` / `--skip-tests`） |
+| `scripts/install-node.ps1` / `scripts/launcher-common.sh` | 启动器共用的 Node.js 检测与自动安装（Windows / macOS；Ask/Auto/Check 或 ask/auto/never 模式） |
 | `scripts/train.ts` | 自博弈训练（参数进化 + few-shot 经验 + SFT 数据集 + 报告） |
 | `training/` | 最近一次训练报告与 SFT 数据集 |
 | `docs/` | README 用界面截图 |
@@ -83,6 +91,7 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 - [ ] `npm run build`：生成 `dist/`，无 TypeScript 错误
 - [ ] `npm run dev -- --host 127.0.0.1 --port 5173 --strictPort` 可启动，HTTP 探测 200
 - [ ] 启动脚本冒烟（按平台）：Windows `启动德州扑克.bat --no-open` / macOS-Linux `bash 启动德州扑克.sh --no-open` 能起服务并返回 200
+- [ ] Node.js 检测语义：已有 Node 时启动器直接跳过安装；缺 Node + `--agent` 时 exit 1 且不安装（需要自动装时用 `--install-node`）
 - [ ] 工作区没有 `node_modules/`、`dist/`、日志或临时脚本被误加入提交（`.gitignore` 已覆盖）
 
 ## 常见问题
@@ -97,9 +106,11 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 | macOS/Linux 下 `$'\r': command not found` | 文件被转成了 CRLF；用 `sed -i 's/\r$//' 文件名` 或重新 `git checkout` |
 | 无浏览器 / 无 GUI 环境 | 跑 `npm test` + `npm run build` 即可验收；不需要真实浏览器 |
 | 本地大模型探测不到 | 那是可选项；确认本机服务已开 CORS（如 `OLLAMA_ORIGINS=*`）再试，不影响游戏 |
+| 自动安装 Node.js 失败 | 需要联网和管理员权限（Windows UAC / macOS 登录密码）；公司电脑或标准用户可能被策略拦截，脚本会回退为手动安装指引，安装后重新运行启动器即可 |
 
 ## 禁止事项
 
 - 不要提交 `node_modules/`、`dist/`、`coverage/`、`*.log`、临时验证脚本。
 - 不要在代码、测试或文档里写入真实 API Key、Token、个人路径。
 - 不要为「通过验收」而跳过测试或伪造训练报告；改动后必须真实运行验证命令。
+- 不要在无人值守环境绕过 `--agent` 的“不自动安装 Node.js”语义去安装系统软件；确有必要时显式使用 `--install-node`，并先确认有管理员权限。
