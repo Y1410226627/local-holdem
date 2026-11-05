@@ -1,11 +1,11 @@
 # 自博弈训练报告
 
-- 生成时间：2026-11-04T16:40:25.692Z
+- 生成时间：2026-11-05T13:53:06.707Z
 - 运行模式：默认全量模式
-- 运行参数：seed = `local-selfplay-v1`，hands = 60，rounds = 10000，mutations = 3，exhibition = 120，mcIterations = 120
+- 运行参数：seed = `demo-b`，hands = 60，rounds = 10，mutations = 3，exhibition = 120，mcIterations = 120
 - 并行评估：16 个 worker / 16 核（4 档同时进化，基准与候选并行评估）
-- 本次耗时：1240.4 秒
-- 训练对局总手数：11976480 手（含基准评估、候选评估与最终对照评估）
+- 本次耗时：1.5 秒
+- 训练对局总手数：13920 手（含基准评估、候选评估与最终对照评估）
 - 经验库展示手数：120 手
 - 训练对象：① 规则引擎机器人（四档参数进化）② 大模型机器人（few-shot 经验库 + SFT 数据集）
 
@@ -30,12 +30,12 @@
 
 | 难度 | baseline BB/100 | trained BB/100 | Δ BB/100 | 接受变异数 | 实际改动字段列表 |
 | --- | ---: | ---: | ---: | ---: | --- |
-| 入门（beginner） | 15.17 | 15.79 | +0.63 | 845 | preflop.play 0.120→0.300、preflop.raise 0.950→0.866、preflop.threeBet 0.990→0.967、preflop.bluffRaiseRate 0.005→0.066、preflop.mixRaiseRate 0.000→0.459、preflop.trapRate 0.000→0.227、postflop.bluffRate 0.005→0.010、postflop.valueThreshold 0.860→0.547、postflop.callMargin 0.120→0.000 |
-| 普通（normal） | 748.88 | 940.54 | +191.67 | 2253 | preflop.play 0.420→0.640、preflop.raise 0.675→0.810、preflop.threeBet 0.900→0.975、preflop.bluffRaiseRate 0.093→0.088、preflop.mixRaiseRate 0.100→0.028、preflop.trapRate 0.040→0.128、postflop.bluffRate 0.070→0.156、postflop.semiBluffRate 0.120→0.239、postflop.valueThreshold 0.720→0.578、postflop.callMargin 0.020→0.114 |
-| 困难（hard） | -846.23 | -525.69 | +320.54 | 2209 | preflop.play 0.465→0.715、preflop.raise 0.714→0.768、preflop.threeBet 0.870→0.928、preflop.bluffRaiseRate 0.090→0.120、preflop.mixRaiseRate 0.180→0.224、preflop.trapRate 0.085→0.190、postflop.bluffRate 0.120→0.256、postflop.semiBluffRate 0.343→0.435、postflop.valueThreshold 0.640→0.698、postflop.callMargin 0.053→0.120 |
-| 专家（expert） | -1129.33 | 187.73 | +1317.06 | 2342 | preflop.play 0.521→0.780、preflop.raise 0.660→0.911、preflop.threeBet 0.810→0.931、preflop.bluffRaiseRate 0.156→0.245、preflop.mixRaiseRate 0.300→0.329、preflop.trapRate 0.136→0.198、postflop.bluffRate 0.187→0.214、postflop.semiBluffRate 0.380→0.623、postflop.valueThreshold 0.631→0.620、postflop.callMargin 0.050→0.120 |
+| 入门（beginner） | 2.38 | 5.13 | +2.75 | 0 | 无字段变化 |
+| 普通（normal） | 480.21 | 1215.65 | +735.44 | 3 | preflop.play 0.640→0.587、preflop.raise 0.810→0.852、preflop.bluffRaiseRate 0.088→0.125、preflop.mixRaiseRate 0.058→0.107、postflop.bluffRate 0.179→0.160 |
+| 困难（hard） | -997.67 | 397.04 | +1394.71 | 0 | 无字段变化 |
+| 专家（expert） | -1169.08 | -853.31 | +315.77 | 0 | 无字段变化 |
 
-- 本次训练有 4/4 档参数发生变化，共接受 7649 个变异。
+- 本次训练有 1/4 档参数发生变化，共接受 3 个变异。
 - 训练参数已写入 `src/ai/data/learnedProfiles.json`（每档只写入 10 个可变异字段，其余字段继续使用内置基础档位）。
 - 生效方式：在页面设置中打开「使用训练后参数」开关后生效（对应 `setLearnedProfilesEnabled(true)`）；默认关闭时普通对局仍使用内置基础档位。
 
@@ -49,53 +49,53 @@
 
 ### 入门（beginner）
 
-- 接受 845/10000 轮（8.5%）；验证集拦截 1172 次；未达阈值 7983 轮；训练对局 2642520 手。
-- 接受时拟合 Δ：最小 +0.50 / 平均 +4.64 / 最大 +36.58 BB/100。
-- 接受轮次：第 1 轮 #1、第 10 轮 #1、第 34 轮 #1、第 35 轮 #1、第 37 轮 #3、第 43 轮 #2、第 62 轮 #1、第 69 轮 #1、第 72 轮 #2、第 95 轮 #2、第 115 轮 #1、第 142 轮 #1、第 155 轮 #2、第 207 轮 #3、第 210 轮 #3、第 231 轮 #3、第 239 轮 #1、第 252 轮 #3、第 254 轮 #2、第 263 轮 #3 等 845 次。
+- 接受 0/10 轮（0.0%）；验证集拦截 4 次；未达阈值 6 轮；训练对局 3360 手。
+- 接受时拟合 Δ：无。
+- 接受轮次：无。
 
 ### 普通（normal）
 
-- 接受 2253/10000 轮（22.5%）；验证集拦截 3633 次；未达阈值 4114 轮；训练对局 3106800 手。
-- 接受时拟合 Δ：最小 +0.50 / 平均 +164.34 / 最大 +3315.67 BB/100。
-- 接受轮次：第 13 轮 #1、第 19 轮 #3、第 30 轮 #2、第 34 轮 #2、第 38 轮 #2、第 41 轮 #3、第 53 轮 #2、第 63 轮 #3、第 70 轮 #2、第 82 轮 #3、第 89 轮 #2、第 90 轮 #2、第 91 轮 #3、第 95 轮 #3、第 99 轮 #1、第 101 轮 #3、第 102 轮 #2、第 103 轮 #1、第 105 轮 #1、第 106 轮 #2 等 2253 次。
+- 接受 3/10 轮（30.0%）；验证集拦截 2 次；未达阈值 5 轮；训练对局 3480 手。
+- 接受时拟合 Δ：最小 +2.50 / 平均 +175.33 / 最大 +458.58 BB/100。
+- 接受轮次：第 2 轮 #1、第 4 轮 #1、第 10 轮 #2。
 
 ### 困难（hard）
 
-- 接受 2209/10000 轮（22.1%）；验证集拦截 3688 次；未达阈值 4103 轮；训练对局 3108120 手。
-- 接受时拟合 Δ：最小 +0.50 / 平均 +141.60 / 最大 +2279.08 BB/100。
-- 接受轮次：第 3 轮 #3、第 6 轮 #2、第 7 轮 #1、第 11 轮 #1、第 15 轮 #1、第 22 轮 #1、第 25 轮 #3、第 38 轮 #2、第 39 轮 #2、第 40 轮 #2、第 43 轮 #2、第 46 轮 #2、第 49 轮 #1、第 51 轮 #1、第 52 轮 #2、第 54 轮 #1、第 60 轮 #1、第 65 轮 #2、第 66 轮 #1、第 68 轮 #2 等 2209 次。
+- 接受 0/10 轮（0.0%）；验证集拦截 5 次；未达阈值 5 轮；训练对局 3480 手。
+- 接受时拟合 Δ：无。
+- 接受轮次：无。
 
 ### 专家（expert）
 
-- 接受 2342/10000 轮（23.4%）；验证集拦截 3646 次；未达阈值 4012 轮；训练对局 3119040 手。
-- 接受时拟合 Δ：最小 +0.50 / 平均 +135.61 / 最大 +1489.83 BB/100。
-- 接受轮次：第 5 轮 #2、第 6 轮 #1、第 14 轮 #1、第 23 轮 #3、第 24 轮 #1、第 25 轮 #3、第 28 轮 #1、第 31 轮 #2、第 32 轮 #1、第 34 轮 #3、第 37 轮 #3、第 40 轮 #1、第 59 轮 #3、第 61 轮 #1、第 63 轮 #2、第 65 轮 #1、第 66 轮 #3、第 67 轮 #1、第 68 轮 #2、第 71 轮 #2 等 2342 次。
+- 接受 0/10 轮（0.0%）；验证集拦截 6 次；未达阈值 4 轮；训练对局 3600 手。
+- 接受时拟合 Δ：无。
+- 接受轮次：无。
 
 ## 4. 最终关键参数
 
 | 参数 | 入门 | 普通 | 困难 | 专家 |
 | --- | ---: | ---: | ---: | ---: |
-| `preflop.play` | 0.300 | 0.640 | 0.715 | 0.780 |
-| `preflop.raise` | 0.866 | 0.810 | 0.768 | 0.911 |
-| `preflop.threeBet` | 0.967 | 0.975 | 0.928 | 0.931 |
-| `preflop.bluffRaiseRate` | 0.066 | 0.088 | 0.120 | 0.245 |
-| `preflop.mixRaiseRate` | 0.459 | 0.028 | 0.224 | 0.329 |
+| `preflop.play` | 0.300 | 0.587 | 0.715 | 0.780 |
+| `preflop.raise` | 0.866 | 0.852 | 0.768 | 0.911 |
+| `preflop.threeBet` | 0.967 | 0.975 | 0.928 | 0.946 |
+| `preflop.bluffRaiseRate` | 0.066 | 0.125 | 0.120 | 0.245 |
+| `preflop.mixRaiseRate` | 0.459 | 0.107 | 0.224 | 0.297 |
 | `preflop.trapRate` | 0.227 | 0.128 | 0.190 | 0.198 |
-| `postflop.bluffRate` | 0.010 | 0.156 | 0.256 | 0.214 |
+| `postflop.bluffRate` | 0.010 | 0.160 | 0.256 | 0.214 |
 | `postflop.semiBluffRate` | 0.000 | 0.239 | 0.435 | 0.623 |
-| `postflop.valueThreshold` | 0.547 | 0.578 | 0.698 | 0.620 |
+| `postflop.valueThreshold` | 0.547 | 0.578 | 0.698 | 0.597 |
 | `postflop.callMargin` | 0.000 | 0.114 | 0.120 | 0.120 |
 
 > `mcIterations`、`betSizes`、`raiseSizes`、`errorRate`、`positionAware`、`style`、`label` 不在变异范围内，四档保持基础档位设定。
 
 ## 5. 大模型机器人训练数据
 
-- few-shot 经验条数：160 条（上限 160）
-- SFT 数据集行数：101 行（上限 400）
-- 经验库按街道：preflop 119、flop 30、turn 7、river 4
-- 经验库按动作：fold 87、check 24、call 6、bet 14、raise 26、allin 3
-- SFT 按街道：preflop 60、flop 30、turn 7、river 4
-- SFT 按动作：fold 44、check 24、call 4、bet 14、raise 12、allin 3
+- few-shot 经验条数：154 条（上限 160）
+- SFT 数据集行数：94 行（上限 400）
+- 经验库按街道：preflop 120、flop 23、turn 8、river 3
+- 经验库按动作：fold 86、check 21、call 8、bet 8、raise 26、allin 5
+- SFT 按街道：preflop 60、flop 23、turn 8、river 3
+- SFT 按动作：fold 45、check 21、call 3、bet 8、raise 12、allin 5
 - 文件路径：`src/ai/data/llm-experience.json`（few-shot 经验库）、`training/llm-sft-dataset.jsonl`（SFT 数据集）。
 - 来源：训练后 hard / expert 座位的 exhibition 自博弈；每手最多 1-2 条，只保留合法、未走回退逻辑、动作明确的决策。
 - 体积控制：SFT 最多 400 行，其中翻牌前最多 60 条；few-shot 经验最多 160 条；报告只保留汇总统计，不再逐轮展开。

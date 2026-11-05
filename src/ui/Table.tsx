@@ -45,6 +45,8 @@ interface TableProps {
   onStartGame: () => void;
   onOpenTutorial: () => void;
   onOpenHistory: () => void;
+  /** 大模型玩家 id → 神态/语句气泡。 */
+  talkBubbles?: Record<number, string>;
 }
 
 interface BlindIds {
@@ -112,6 +114,7 @@ export function Table({
   onStartGame,
   onOpenTutorial,
   onOpenHistory,
+  talkBubbles = {},
 }: TableProps) {
   const hand = table.hand;
   const humanIndex = table.players.findIndex((player) => player.isHuman);
@@ -256,6 +259,7 @@ export function Table({
               winAmount={winMap.get(seat.id) ?? 0}
               showdown={showdownMap.get(seat.id) ?? null}
               showBet={table.phase === 'playing'}
+              talk={talkBubbles[seat.id]}
             />
           );
         })}

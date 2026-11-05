@@ -8,7 +8,6 @@
  * 注意：浏览器直连本地服务仍受 CORS 限制；服务必须允许跨域
  * （Ollama 需 OLLAMA_ORIGINS=*，LM Studio 需开启 CORS），否则探测结果是“未发现”。
  */
-import type { LlmSlotSettings } from './llmSettings';
 
 export type LlmServiceKind = 'ollama' | 'openai';
 
@@ -160,11 +159,11 @@ export async function detectLocalLlmServices(timeoutMs = 1200): Promise<Detected
   return Array.from(byPort.values()).sort((a, b) => a.port - b.port);
 }
 
-/** 把探测到的某个模型转成槽位补丁（一键填入）。 */
+/** 把探测到的某个模型转成设置补丁（一键填入）。 */
 export function slotPatchFromDetectedModel(
   service: DetectedLlmService,
   model: string,
-): Partial<Omit<LlmSlotSettings, 'slot'>> {
+): { baseUrl: string; model: string; name: string } {
   return {
     baseUrl: service.baseUrl,
     model,

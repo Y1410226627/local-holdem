@@ -292,33 +292,25 @@ describe('自博弈训练脚本：纯函数', () => {
         'user',
         'assistant',
       ]);
-      expect(messages[0].content).toContain('只输出一行 JSON');
-      expect(messages[1].content).toMatch(/翻牌前|翻牌|转牌|河牌/);
-      for (const field of [
-        '你的底牌',
-        '公共牌',
-        '底池',
-        '当前下注',
-        '需跟注',
-        '是否面对下注',
-        '【合法动作】',
-      ]) {
+      expect(messages[0].content).toContain('compact JSON line');
+      expect(messages[1].content).toMatch(/PRE|FLOP|TURN|RIVER/);
+      for (const field of ['HAND ', 'HOLE ', 'POT ', 'CURBET', 'TO-CALL', 'LEGAL ']) {
         expect(messages[1].content).toContain(field);
       }
 
       const action = JSON.parse(messages[2].content) as {
-        action?: string;
-        amount?: number;
-        reason?: string;
+        a?: string;
+        x?: number;
+        w?: string;
       };
-      expect(['fold', 'check', 'call', 'bet', 'raise', 'allin']).toContain(action.action);
-      expect(typeof action.reason).toBe('string');
-      expect((action.reason ?? '').length).toBeGreaterThan(0);
-      if (action.action === 'bet' || action.action === 'raise') {
-        expect(Number.isInteger(action.amount)).toBe(true);
-        expect(action.amount as number).toBeGreaterThan(0);
+      expect(['fold', 'check', 'call', 'bet', 'raise', 'allin']).toContain(action.a);
+      expect(typeof action.w).toBe('string');
+      expect((action.w ?? '').length).toBeGreaterThan(0);
+      if (action.a === 'bet' || action.a === 'raise') {
+        expect(Number.isInteger(action.x)).toBe(true);
+        expect(action.x as number).toBeGreaterThan(0);
       } else {
-        expect(action.amount).toBeUndefined();
+        expect(action.x).toBeUndefined();
       }
     }
   }, 20000);
@@ -348,17 +340,15 @@ describe('自博弈训练脚本：纯函数', () => {
     ]);
     expect(withLegal).toHaveLength(1);
     const legalUser = withLegal[0].record.messages[1].content;
-    expect(legalUser).toContain('跟注 40');
-    expect(legalUser).toContain('加注到 80–1000');
-    expect(legalUser).toContain('全下');
-    expect(legalUser).not.toContain('样本只记录本次合法动作');
+    expect(legalUser).toContain('"caAmt":40');
+    expect(legalUser).toContain('"min":80');
+    expect(legalUser).toContain('"max":1000');
+    expect(legalUser).toContain('"ai":1');
 
     // 没有 legal：只描述该样本动作，不编造其它选项。
     const withoutLegal = buildSftSamples([SFT_SAMPLE]);
     expect(withoutLegal).toHaveLength(1);
-    expect(withoutLegal[0].record.messages[1].content).toContain(
-      '跟注 40（样本只记录本次合法动作，其余选项未记录）',
-    );
+    expect(withoutLegal[0].record.messages[1].content).toContain('"ca":1,"caAmt":40');
 
     // 只保留 hard / expert、合法、动作明确的样本。
     expect(buildSftSamples([{ ...SFT_SAMPLE, difficulty: 'beginner' }])).toHaveLength(0);

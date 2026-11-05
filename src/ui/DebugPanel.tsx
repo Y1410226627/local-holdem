@@ -52,6 +52,7 @@ export function DebugPanel({ records }: DebugPanelProps) {
                 </span>
               </div>
               <div className="debug-card__action">{record.actionText}</div>
+              {record.talk && <div className="debug-card__talk">台词：{record.talk}</div>}
 
               {(record.model || record.latencyMs !== undefined) && (
                 <div className="debug-card__model">

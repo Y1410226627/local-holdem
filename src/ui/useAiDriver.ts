@@ -131,15 +131,18 @@ export function useAiDriver({
         let fallbackReason: string | undefined;
         let llmFailureMessage: string | null = null;
         let llmAttemptLatency: number | undefined;
+        let talk: string | undefined;
 
         if (isLlm && llmConfig) {
           const attemptStarted = performance.now();
           try {
             const llmDecision = await decideWithLlm(view, aiDifficulty, llmConfig, {
               signal: controller.signal,
+              talk: llmSettingsRef.current.tableTalk,
             });
             if (!isCurrent() || controller.signal.aborted) return;
             decision = llmDecision;
+            talk = llmDecision.talk;
           } catch (error) {
             // 被换局 / 人类操作 / 新一手取消：静默退出，不提示、不回退。
             if (!isCurrent() || controller.signal.aborted) return;
@@ -200,6 +203,7 @@ export function useAiDriver({
           rawResponse: decision.debug.rawResponse,
           fallbackFromLlm,
           fallbackReason,
+          talk,
         });
       } catch (error) {
         if (!isCurrent()) return;

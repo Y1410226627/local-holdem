@@ -1,8 +1,9 @@
 /**
- * 大模型机器人的「对局记忆」：把每手牌结束后的复盘存入浏览器 localStorage，
- * 下次决策时作为 few-shot 经验注入提示词，让本地大模型在一局又一局中积累经验。
+ * 大模型玩家的「对局记忆」：把每手牌结束后的复盘存入浏览器 localStorage，
+ * 下次决策时作为极简英文经验注入提示词（HIST 行），让大模型跨局积累经验。
  *
  * 注意：仅存公开信息 + 该模型自己的底牌与行动，不涉及其他玩家底牌（摊牌公开的除外）。
+ * 槽位类型为 number（支持 1..5 个甚至更多大模型玩家）。
  */
 import type { Card } from '../game/types';
 import { cardLabel, cardsLabel } from '../game/cards';
@@ -10,7 +11,7 @@ import { cardLabel, cardsLabel } from '../game/cards';
 export type LlmHandOutcome = 'win' | 'lose' | 'split';
 
 export interface LlmHandMemory {
-  slot: 1 | 2;
+  slot: number;
   handNo: number;
   hole: string;
   board: string;
@@ -23,8 +24,8 @@ export interface LlmHandMemory {
 }
 
 const STORAGE_KEY = 'holdem-llm-memory-v1';
-const MAX_TOTAL = 240;
-const MAX_PER_SLOT = 120;
+const MAX_TOTAL = 500;
+const MAX_PER_SLOT = 80;
 
 let fallbackMemories: LlmHandMemory[] = [];
 
@@ -36,6 +37,10 @@ function localStorageAvailable(): boolean {
   }
 }
 
+function isSlot(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 99;
+}
+
 function readAll(): LlmHandMemory[] {
   if (!localStorageAvailable()) return fallbackMemories.slice();
   try {
@@ -45,9 +50,7 @@ function readAll(): LlmHandMemory[] {
     if (!Array.isArray(parsed)) return [];
     return parsed.filter(
       (item): item is LlmHandMemory =>
-        !!item &&
-        typeof item === 'object' &&
-        ((item as LlmHandMemory).slot === 1 || (item as LlmHandMemory).slot === 2),
+        !!item && typeof item === 'object' && isSlot((item as LlmHandMemory).slot),
     );
   } catch {
     return [];
@@ -67,8 +70,8 @@ function writeAll(memories: LlmHandMemory[]): void {
   }
 }
 
-/** 读取某个大模型机器人的历史对局记忆（旧 → 新）。 */
-export function loadHandMemories(slot: 1 | 2): LlmHandMemory[] {
+/** 读取某个大模型玩家的历史对局记忆（旧 → 新）。 */
+export function loadHandMemories(slot: number): LlmHandMemory[] {
   return readAll()
     .filter((memory) => memory.slot === slot)
     .slice(-MAX_PER_SLOT);
@@ -77,13 +80,15 @@ export function loadHandMemories(slot: 1 | 2): LlmHandMemory[] {
 export function appendHandMemory(memory: LlmHandMemory): void {
   const all = readAll();
   all.push(memory);
-  // 每个槽位只保留最近 120 条
-  const bySlot = (slot: 1 | 2): LlmHandMemory[] =>
-    all.filter((item) => item.slot === slot).slice(-MAX_PER_SLOT);
-  writeAll([...bySlot(1), ...bySlot(2)]);
+  const slots = new Set(all.map((item) => item.slot));
+  writeAll(
+    [...slots].flatMap((slot) =>
+      all.filter((item) => item.slot === slot).slice(-MAX_PER_SLOT),
+    ),
+  );
 }
 
-export function clearHandMemories(slot?: 1 | 2): void {
+export function clearHandMemories(slot?: number): void {
   if (slot === undefined) {
     writeAll([]);
     return;
@@ -91,26 +96,31 @@ export function clearHandMemories(slot?: 1 | 2): void {
   writeAll(readAll().filter((memory) => memory.slot !== slot));
 }
 
-export function memoryCount(slot: 1 | 2): number {
+export function memoryCount(slot: number): number {
   return loadHandMemories(slot).length;
 }
 
-/** 供 LLM 提示词使用的经验行（最近的复盘）。 */
-export function memoryPromptLines(slot: 1 | 2, limit = 3): string[] {
+function memoryResultLabel(result: LlmHandOutcome): string {
+  return result === 'win' ? 'win' : result === 'lose' ? 'lose' : 'split';
+}
+
+/** 供 LLM 提示词使用的极简英文经验行（不包含中文复盘，省 token）。 */
+export function memoryPromptLines(slot: number, limit = 2): string[] {
   return loadHandMemories(slot)
     .slice(-limit)
     .map((memory) => {
-      const resultText =
-        memory.result === 'win' ? '赢' : memory.result === 'lose' ? '输' : '平分';
-      const netText = `${memory.net >= 0 ? '+' : ''}${memory.net}`;
-      return `- 底牌 ${memory.hole}，公共牌 ${memory.board || '翻牌前'}，行动：${
-        memory.actions.join(' → ') || '无'
-      }；结果${resultText} ${netText}；复盘：${memory.note}`;
+      const net = `${memory.net >= 0 ? '+' : ''}${memory.net}`;
+      const board = memory.board || '-';
+      const actions = memory.actions.slice(-4).join(' > ');
+      return `HIST hole ${memory.hole.replace(/\s+/g, '')} board ${board.replace(
+        /\s+/g,
+        '',
+      )} ${memoryResultLabel(memory.result)} ${net}${actions ? ` [${actions}]` : ''}`;
     });
 }
 
 export interface BuildHandMemoryParams {
-  slot: 1 | 2;
+  slot: number;
   handNo: number;
   holeCards: readonly Card[];
   board: readonly Card[];

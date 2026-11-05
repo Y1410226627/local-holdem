@@ -8,9 +8,9 @@ import {
 } from '../game/stateMachine';
 import { buildPlayerView } from '../game/playerView';
 import { getLegalActions } from '../game/gameEngine';
-import type { LlmSeatConfig, TableConfig } from '../game/types';
+import { MAX_LLM_SEATS, type LlmSeatConfig, type TableConfig } from '../game/types';
 
-function llmSeat(slot: 1 | 2, overrides: Partial<LlmSeatConfig> = {}): LlmSeatConfig {
+function llmSeat(slot: number, overrides: Partial<LlmSeatConfig> = {}): LlmSeatConfig {
   return {
     slot,
     name: `测试大模型${slot}`,
@@ -73,7 +73,7 @@ describe('会话：本地大模型机器人入座', () => {
       /放不下/,
     );
     expect(() => createTable(configWithSeats({ llmSeats: [llmSeat(1), llmSeat(1)] }))).toThrow(
-      /槽位重复/,
+      /座位号重复/,
     );
     expect(() =>
       createTable(configWithSeats({ llmSeats: [llmSeat(1, { baseUrl: '' })] })),
@@ -81,15 +81,76 @@ describe('会话：本地大模型机器人入座', () => {
     expect(() =>
       createTable(configWithSeats({ llmSeats: [llmSeat(1, { model: '  ' })] })),
     ).toThrow(/模型名称/);
-    const threeSeats = {
+    const tooManySeats: Partial<TableConfig> = {
+      playerCount: 6,
+      llmSeats: Array.from({ length: MAX_LLM_SEATS + 1 }, (_item, index) =>
+        llmSeat(index + 1, { enabled: false }),
+      ),
+    };
+    expect(() => createTable(tooManySeats)).toThrow(/最多支持/);
+    const badSlot: Partial<TableConfig> = {
       playerCount: 4,
-      llmSeats: [llmSeat(1), llmSeat(2)],
-    } as Partial<TableConfig>;
-    (threeSeats.llmSeats as LlmSeatConfig[]).push({
-      ...llmSeat(1),
-      slot: 1,
+      llmSeats: [llmSeat(9)],
+    };
+    expect(() => createTable(badSlot)).toThrow(/座位号必须/);
+  });
+
+  it('不限 2 个：6 人桌可同时入座 5 个大模型玩家', () => {
+    const table = createTable({
+      playerCount: 6,
+      llmSeats: Array.from({ length: MAX_LLM_SEATS }, (_item, index) => llmSeat(index + 1)),
     });
-    expect(() => createTable(threeSeats)).toThrow(/最多支持/);
+    expect(table.players.map((player) => player.kind)).toEqual([
+      'human',
+      'llm',
+      'llm',
+      'llm',
+      'llm',
+      'llm',
+    ]);
+    expect(table.players.map((player) => player.llmSlot)).toEqual([
+      undefined,
+      1,
+      2,
+      3,
+      4,
+      5,
+    ]);
+    const started = startNextHand(table);
+    expect(started.hand!.players.filter((player) => player.kind === 'llm')).toHaveLength(5);
+  });
+
+  it('人类与本地机器人的名字都可以自由编写', () => {
+    const table = startNextHand(
+      createTable({
+        playerCount: 5,
+        humanName: '赌神',
+        localBotNames: ['阿甲', '阿乙', '阿丙'],
+        llmSeats: [llmSeat(1, { name: '小模型·阿尔法' })],
+      }),
+    );
+    expect(table.players.map((player) => player.name)).toEqual([
+      '赌神',
+      '小模型·阿尔法',
+      '阿甲',
+      '阿乙',
+      '阿丙',
+    ]);
+    expect(table.hand!.players.map((player) => player.name)).toEqual([
+      '赌神',
+      '小模型·阿尔法',
+      '阿甲',
+      '阿乙',
+      '阿丙',
+    ]);
+  });
+
+  it('模型人物设定保存在桌配置中，供提示词使用', () => {
+    const table = createTable({
+      playerCount: 4,
+      llmSeats: [llmSeat(1, { persona: '冷静紧凶的数学流' })],
+    });
+    expect(table.config.llmSeats[0].persona).toBe('冷静紧凶的数学流');
   });
 
   it('开始下一手时大模型座位信息（kind / llmSlot / 名称）保留到引擎', () => {

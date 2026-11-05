@@ -23,11 +23,16 @@ import { DebugPanel } from './DebugPanel';
 import { HistoryModal } from './HistoryModal';
 import { TutorialModal } from './TutorialModal';
 import { LlmSettingsModal } from './LlmSettingsModal';
+import { AdvisorPanel } from './AdvisorPanel';
 import { formatChips, getErrorMessage } from './format';
 import {
+  advisorReady,
   enabledLlmSeatConfigs,
   loadLlmSettings,
+  localBotNamesFor,
+  resolvedHumanName,
   saveLlmSettings,
+  updateAdvisorSettings,
   type LlmSettings,
 } from './llmSettings';
 import {
@@ -56,18 +61,21 @@ function createBootState(): BootState {
     smallBlind: 10,
     bigBlind: 20,
     startingStack: 1000,
+    humanName: resolvedHumanName(llm),
+    localBotNames: localBotNamesFor(llm, DEFAULT_SETTINGS.playerCount - 1),
+    llmSeats: enabledLlmSeatConfigs(llm),
   };
   try {
     return {
-      table: createTable({ ...base, llmSeats: enabledLlmSeatConfigs(llm) }),
+      table: createTable(base),
       llm,
       error: null,
     };
   } catch (error) {
     return {
-      table: createTable(base),
+      table: createTable({ ...base, llmSeats: [] }),
       llm,
-      error: `当前大模型设置无法加入牌桌：${getErrorMessage(error)}。已先创建不含大模型的闲置牌桌，请调整人数或关闭一个槽位后再开始。`,
+      error: `当前 AI 设置无法加入牌桌：${getErrorMessage(error)}。已先创建不含大模型的闲置牌桌，请调整人数或关闭一些座位后再开始。`,
     };
   }
 }
@@ -88,6 +96,8 @@ export function App() {
   const [learnedEnabled, setLearnedEnabled] = useState(
     () => learnedAvailable && loadLearnedProfilesEnabled(),
   );
+  /** 大模型玩家的神态/语句气泡：玩家 id → 文本（自动消失）。 */
+  const [talkBubbles, setTalkBubbles] = useState<Record<number, string>>({});
 
   /** 换局 / 改难度 / 人类行动时递增，用于作废在途的 AI 决策。 */
   const epochRef = useRef(0);
@@ -109,6 +119,19 @@ export function App() {
     recordIdRef.current += 1;
     const nextRecord: AiDebugRecord = { ...record, id: recordIdRef.current };
     setDebugRecords((previous) => [nextRecord, ...previous].slice(0, 10));
+    if (record.talk) {
+      const talk = record.talk;
+      const playerId = record.playerId;
+      setTalkBubbles((previous) => ({ ...previous, [playerId]: talk }));
+      window.setTimeout(() => {
+        setTalkBubbles((previous) => {
+          if (previous[playerId] !== talk) return previous;
+          const copy = { ...previous };
+          delete copy[playerId];
+          return copy;
+        });
+      }, 9000);
+    }
   }, []);
 
   const handleAiError = useCallback(
@@ -127,6 +150,11 @@ export function App() {
     epochRef,
     llmSettings,
   });
+
+  // 换手 / 换局时清空神态气泡
+  useEffect(() => {
+    setTalkBubbles({});
+  }, [table.handNo, table.phase]);
 
   // 训练后参数默认开启（检测到训练产物时）；切换立即生效。
   useEffect(() => {
@@ -200,6 +228,8 @@ export function App() {
           smallBlind: 10,
           bigBlind: 20,
           startingStack: 1000,
+          humanName: resolvedHumanName(llmSettings),
+          localBotNames: localBotNamesFor(llmSettings, settings.playerCount - 1),
           llmSeats,
         }),
       );
@@ -297,6 +327,29 @@ export function App() {
     saveLlmSettings(next);
   }, []);
 
+  const handleToggleTableTalk = useCallback(
+    (enabled: boolean) => {
+      handleLlmSettingsChange({ ...llmSettings, tableTalk: enabled });
+      showNotice(
+        'info',
+        enabled
+          ? '已开启「神态语句」：大模型行动时会附带一句短台词（会多消耗少量 token）。'
+          : '已关闭「神态语句」：节省 token，大模型只输出动作。',
+      );
+    },
+    [handleLlmSettingsChange, llmSettings, showNotice],
+  );
+
+  const handleToggleAdvisor = useCallback(
+    (enabled: boolean) => {
+      handleLlmSettingsChange(updateAdvisorSettings(llmSettings, { enabled }));
+      if (enabled && !advisorReady(llmSettings)) {
+        showNotice('info', 'AI 军师已打开：请先在「AI 玩家设置」里填写军师模型，否则无法提问。');
+      }
+    },
+    [handleLlmSettingsChange, llmSettings, showNotice],
+  );
+
   const handleToggleLearned = useCallback(
     (enabled: boolean) => {
       setLearnedEnabled(enabled);
@@ -371,6 +424,10 @@ export function App() {
         learnedAvailable={learnedAvailable}
         learnedEnabled={learnedEnabled}
         onToggleLearned={handleToggleLearned}
+        tableTalk={llmSettings.tableTalk}
+        onToggleTableTalk={handleToggleTableTalk}
+        advisorEnabled={llmSettings.advisor.enabled}
+        onToggleAdvisor={handleToggleAdvisor}
       />
 
       <main className="app-main">
@@ -384,6 +441,7 @@ export function App() {
             onStartGame={startGame}
             onOpenTutorial={openTutorial}
             onOpenHistory={openHistory}
+            talkBubbles={talkBubbles}
           />
 
           {notice && (
@@ -417,13 +475,21 @@ export function App() {
         </div>
 
         <aside className={`sidebar${settings.debugMode ? ' sidebar--with-debug' : ''}`}>
+          {llmSettings.advisor.enabled && (
+            <AdvisorPanel
+              table={table}
+              settings={llmSettings}
+              onOpenSettings={openLlmSettings}
+              onDisable={() => handleToggleAdvisor(false)}
+            />
+          )}
           <LogPanel table={table} />
           {settings.debugMode && <DebugPanel records={debugRecords} />}
         </aside>
       </main>
 
       <footer className="app-footer">
-        <span>纯本地运行 · 大模型仅访问你配置的本地地址</span>
+        <span>纯本地运行 · 大模型仅访问你配置的服务地址</span>
         <span>机器人难度：{DIFFICULTY_LABELS[table.config.difficulty]} · 无限注</span>
       </footer>
 
@@ -438,6 +504,7 @@ export function App() {
       {llmSettingsOpen && (
         <LlmSettingsModal
           settings={llmSettings}
+          playerCount={settings.playerCount}
           onChange={handleLlmSettingsChange}
           onClose={closeLlmSettings}
         />

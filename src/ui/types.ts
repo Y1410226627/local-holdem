@@ -72,6 +72,8 @@ export interface AiDebugRecord {
   fallbackFromLlm?: boolean;
   /** 回退原因（中文）。 */
   fallbackReason?: string;
+  /** 大模型玩家输出的神态/语句（开启「神态语句」时）。 */
+  talk?: string;
 }
 
 /** 页面顶部的提示（错误 / 信息）。 */

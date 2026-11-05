@@ -19,7 +19,7 @@ export function WelcomeLobby({ info, onStartGame, onOpenTutorial }: WelcomeLobby
         <h2 className="lobby-card__title">先看规则，再坐上牌桌</h2>
         <p className="lobby-card__lead">
           用两张底牌和五张公共牌组成最强牌型，赢下底池。你与本地算法机器人同桌，
-          也可以在设置里加入两个本地大模型机器人。
+          也可以在「AI 玩家设置」里加入多个大模型玩家（含自定义名字与人物设定）。
         </p>
 
         <div className="lobby-card__facts" aria-label="当前设置">
@@ -39,7 +39,7 @@ export function WelcomeLobby({ info, onStartGame, onOpenTutorial }: WelcomeLobby
         {info.llmCount > info.playerCount - 1 && (
           <p className="lobby-card__warning" role="alert">
             当前 {info.playerCount} 人桌放不下 {info.llmCount} 个大模型机器人：
-            请增加人数，或到「大模型设置」关闭一个槽位。
+            请增加人数，或到「AI 玩家设置」减少启用的大模型玩家。
           </p>
         )}
 

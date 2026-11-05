@@ -18,6 +18,12 @@ interface SettingsBarProps {
   learnedAvailable: boolean;
   learnedEnabled: boolean;
   onToggleLearned: (enabled: boolean) => void;
+  /** 大模型玩家是否输出神态/语句。 */
+  tableTalk: boolean;
+  onToggleTableTalk: (enabled: boolean) => void;
+  /** AI 军师面板开关。 */
+  advisorEnabled: boolean;
+  onToggleAdvisor: (enabled: boolean) => void;
 }
 
 const PLAYER_COUNTS = [2, 3, 4, 5, 6];
@@ -36,8 +42,13 @@ export function SettingsBar({
   learnedAvailable,
   learnedEnabled,
   onToggleLearned,
+  tableTalk,
+  onToggleTableTalk,
+  advisorEnabled,
+  onToggleAdvisor,
 }: SettingsBarProps) {
   const canNextHand = table.phase === 'handOver' || table.phase === 'idle';
+  const maxLlmCount = Math.max(0, settings.playerCount - 1);
 
   return (
     <section className="settings-bar" aria-label="牌局设置">
@@ -113,6 +124,24 @@ export function SettingsBar({
           <span>调试模式</span>
         </label>
 
+        <label className="toggle" title="让大模型玩家在行动时附带一句神态/台词（额外消耗少量 token）">
+          <input
+            type="checkbox"
+            checked={tableTalk}
+            onChange={(event) => onToggleTableTalk(event.target.checked)}
+          />
+          <span>神态语句</span>
+        </label>
+
+        <label className="toggle" title="人类玩家的私人教练：按需分析局势/闲聊（中文，省 token）">
+          <input
+            type="checkbox"
+            checked={advisorEnabled}
+            onChange={(event) => onToggleAdvisor(event.target.checked)}
+          />
+          <span>AI 军师</span>
+        </label>
+
         {learnedAvailable && (
           <label className="toggle toggle--learned">
             <input
@@ -130,6 +159,9 @@ export function SettingsBar({
             {table.phase === 'idle'
               ? '点「开始对局」时生成实际种子'
               : `本局实际种子：${table.config.seed}`}
+          </span>
+          <span className="settings-hint__players" aria-label="玩家名称">
+            玩家名称、多个大模型、人物设定与 AI 军师：点「AI 玩家设置」。
           </span>
           {learnedAvailable && (
             <span className="settings-hint__loaded">
@@ -167,9 +199,9 @@ export function SettingsBar({
           }`}
           onClick={onOpenLlmSettings}
         >
-          大模型设置
-          <span className="settings-bar__llm-count" aria-label={`已启用 ${llmEnabledCount} 个`}>
-            {llmEnabledCount}/2
+          AI 玩家设置
+          <span className="settings-bar__llm-count" aria-label={`已启用 ${llmEnabledCount} 个大模型玩家`}>
+            {llmEnabledCount}/{maxLlmCount}
           </span>
         </button>
       </div>

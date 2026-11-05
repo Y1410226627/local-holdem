@@ -30,7 +30,7 @@ export interface PublicPlayerView {
   /** 玩家种类（人类 / 本地算法 / 大模型）。 */
   kind?: PlayerKind;
   /** 大模型机器人槽位。 */
-  llmSlot?: 1 | 2;
+  llmSlot?: number;
   stack: number;
   committedThisStreet: number;
   totalCommitted: number;

@@ -44,7 +44,7 @@ export interface CreateHandPlayerInput {
   stack: number;
   difficulty?: Difficulty;
   kind?: PlayerKind;
-  llmSlot?: 1 | 2;
+  llmSlot?: number;
 }
 
 export interface CreateHandOptions {

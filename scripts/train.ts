@@ -829,12 +829,13 @@ function toExperienceSample(
 /* 大模型机器人 SFT 数据集                                             */
 /* ------------------------------------------------------------------ */
 
-/** SFT 数据集使用的 system 提示词（与 llmBot 的提示词风格保持一致）。 */
+/** SFT 数据集使用的 system 提示词（与 llmBot 的精简英文提示词风格保持一致）。 */
 export const SFT_SYSTEM_PROMPT = [
-  '你是一位本地无限注德州扑克机器人。',
-  '只输出一行 JSON 动作：{"action":"fold|check|call|bet|raise|allin","amount":整数或省略,"reason":"中文简短理由"}。',
-  '合法动作严格以用户消息中的【合法动作】为准；bet/raise 的 amount 必须是整数；不要输出任何其它文字。',
-].join('\n');
+  "You are a No-Limit Hold'em bot.",
+  'Reply with EXACTLY ONE compact JSON line, no markdown, no thinking:',
+  '{"a":"fold|check|call|bet|raise|allin","x":int-only-for-bet-raise,"w":"short English reason"}',
+  'Amount x is the TOTAL chips for this street (raise-to). Follow LEGAL exactly; allin = shove.',
+].join(' ');
 
 export type SftRole = 'system' | 'user' | 'assistant';
 
@@ -866,6 +867,21 @@ const STREET_BOARD_COUNTS: Record<Street, number> = {
   flop: 3,
   turn: 4,
   river: 5,
+};
+
+/** SFT user 消息使用的短代码（与 llmBot 提示词一致，省 token）。 */
+const SFT_STREET_CODES: Record<Street, string> = {
+  preflop: 'PRE',
+  flop: 'FLOP',
+  turn: 'TURN',
+  river: 'RIVER',
+};
+
+const SFT_POSITION_CODES: Record<string, string> = {
+  早位: 'EP',
+  中位: 'MP',
+  晚位: 'LP',
+  盲注位: 'BLIND',
 };
 
 function simpleActionForType(type: 'fold' | 'check' | 'call' | 'allin'): PlayerAction {
@@ -905,98 +921,89 @@ function normalizeSftAction(sample: ExperienceDecisionSample): PlayerAction | nu
   return candidate;
 }
 
-/** 生成 user 消息里的【合法动作】描述：有真实 legal 就用真实数据，否则只描述该样本动作。 */
+/** 生成 user 消息里的合法动作短 JSON：有真实 legal 就用真实数据，否则只声明样本动作合法。 */
 function legalActionsHint(sample: ExperienceDecisionSample): string {
   const legal = sample.legal;
   if (legal) {
-    const allowed: string[] = [];
-    if (legal.canFold) allowed.push('弃牌');
-    if (legal.canCheck) allowed.push('过牌');
-    if (legal.canCall) allowed.push(`跟注 ${legal.callAmount}`);
-    if (legal.canBet) {
-      allowed.push(`下注（最小 ${legal.minRaiseTo}，最大 ${legal.maxRaiseTo}）`);
-    }
-    if (legal.canRaise) {
-      allowed.push(`加注到 ${legal.minRaiseTo}–${legal.maxRaiseTo}`);
-    }
-    if (legal.canAllIn) {
-      allowed.push(
-        legal.isAllInCall
-          ? `全下跟注（投入 ${legal.callAmount}）`
-          : `全下（加到 ${legal.maxRaiseTo}）`,
-      );
-    }
-    if (allowed.length === 0) allowed.push('无（局面数据异常）');
-    return allowed.join('；');
+    return JSON.stringify({
+      f: legal.canFold ? 1 : 0,
+      ck: legal.canCheck ? 1 : 0,
+      ca: legal.canCall ? 1 : 0,
+      caAmt: legal.callAmount,
+      b: legal.canBet ? 1 : 0,
+      r: legal.canRaise ? 1 : 0,
+      min: legal.minRaiseTo,
+      max: legal.maxRaiseTo,
+      ai: legal.canAllIn ? 1 : 0,
+      cur: legal.currentBet,
+    });
   }
 
   // 没有记录 legal 时不要编造其它选项：只声明该样本动作本身是合法的。
   const action = sample.action;
-  const suffix = '（样本只记录本次合法动作，其余选项未记录）';
   switch (action.type) {
     case 'fold':
-      return `弃牌${suffix}`;
+      return '{"f":1}';
     case 'check':
-      return `过牌${suffix}`;
+      return '{"ck":1}';
     case 'call':
-      return `跟注 ${sample.callAmount}${suffix}`;
+      return `{"ca":1,"caAmt":${sample.callAmount}}`;
     case 'bet':
-      return `下注到 ${action.amount}${suffix}`;
+      return `{"b":1,"x":${action.amount}}`;
     case 'raise':
-      return `加注到 ${action.amount}${suffix}`;
+      return `{"r":1,"x":${action.amount}}`;
     case 'allin':
-      return `全下${suffix}`;
+      return '{"ai":1}';
   }
 }
 
 function buildSftUserMessage(sample: ExperienceDecisionSample): string {
-  const street = STREET_LABELS[sample.street];
+  const street = SFT_STREET_CODES[sample.street];
+  const position = SFT_POSITION_CODES[POSITION_LABELS[sample.position]] ?? 'MP';
   const hole = sample.hole.map((card) => cardLabel(card)).join(' ');
-  const board =
-    sample.board.length === 0
-      ? '无（翻牌前）'
-      : sample.board.map((card) => cardLabel(card)).join(' ');
-  const context = [`【当前牌局】${street}；位置：${POSITION_LABELS[sample.position]}`];
+  const board = sample.board.length === 0 ? '-' : sample.board.map((card) => cardLabel(card)).join(' ');
+  const context = [`HAND ${street} | POS ${position}`];
   if (typeof sample.stack === 'number' && Number.isFinite(sample.stack)) {
-    context.push(`你的筹码 ${sample.stack}`);
+    context.push(`STACK ${sample.stack}`);
   }
   if (typeof sample.playerCount === 'number' && Number.isFinite(sample.playerCount)) {
-    context.push(`${sample.playerCount} 人桌`);
+    context.push(`PLAYERS ${sample.playerCount}`);
   }
   return [
-    `${context.join('；')}。`,
-    `你的底牌：${hole}`,
-    `公共牌：${board}`,
-    `底池 ${sample.pot}；当前下注 ${sample.currentBet}；需跟注 ${sample.callAmount}；是否面对下注：${sample.facingBet ? '是' : '否'}。`,
-    `【合法动作】${legalActionsHint(sample)}。`,
-    '请只输出一行 JSON 动作。',
+    context.join(' | '),
+    `HOLE ${hole} | BOARD ${board}`,
+    `POT ${sample.pot} | CURBET ${sample.currentBet} | TO-CALL ${sample.callAmount}`,
+    `LEGAL ${legalActionsHint(sample)}`,
   ].join('\n');
 }
 
-function buildSftReason(sample: ExperienceDecisionSample): string {
-  const raw = typeof sample.reasoning === 'string' ? sample.reasoning : '';
-  const normalized = raw.replace(/\s+/g, ' ').trim();
-  if (normalized.length === 0) return '按当前牌力与底池赔率选择';
-  // 去掉“专家风格：”等前缀，只保留最后一个分句（动作结论），让 assistant 理由简短完整。
-  const withoutStyle = normalized.replace(/^(入门|普通|困难|专家)风格：/, '');
-  const clauses = withoutStyle
-    .split('；')
-    .map((part) => part.trim())
-    .filter((part) => part.length > 0);
-  const last = clauses.length > 0 ? clauses[clauses.length - 1] : withoutStyle;
-  const reason = last.length >= 4 ? last : withoutStyle;
-  return reason.length > 60 ? `${reason.slice(0, 58)}…` : reason;
+/** assistant 的简短英文理由（不再输出中文复盘，避免训练数据浪费 token）。 */
+function buildSftReason(action: PlayerAction): string {
+  switch (action.type) {
+    case 'fold':
+      return 'hand too weak';
+    case 'check':
+      return 'check for free';
+    case 'call':
+      return 'call with pot odds';
+    case 'bet':
+      return 'bet for value';
+    case 'raise':
+      return 'raise for value';
+    case 'allin':
+      return 'shove for value';
+  }
 }
 
 function buildSftAssistantContent(
   sample: ExperienceDecisionSample,
   action: PlayerAction,
 ): string {
-  const payload: Record<string, string | number> = { action: action.type };
+  const payload: Record<string, string | number> = { a: action.type };
   if ((action.type === 'bet' || action.type === 'raise') && Number.isInteger(action.amount)) {
-    payload.amount = action.amount;
+    payload.x = action.amount;
   }
-  payload.reason = buildSftReason(sample);
+  payload.w = buildSftReason(action);
   return JSON.stringify(payload);
 }
 

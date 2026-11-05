@@ -41,30 +41,30 @@ export function validateTableConfig(config: TableConfig): void {
   }
   const llmSeats = config.llmSeats ?? [];
   if (!Array.isArray(llmSeats) || llmSeats.length > MAX_LLM_SEATS) {
-    throw new Error(`最多支持 ${MAX_LLM_SEATS} 个本地大模型机器人`);
+    throw new Error(`最多支持 ${MAX_LLM_SEATS} 个大模型机器人`);
   }
   const slots = new Set<number>();
   let enabledLlmCount = 0;
   for (const seat of llmSeats) {
-    if (seat.slot !== 1 && seat.slot !== 2) {
-      throw new Error('大模型机器人槽位必须为 1 或 2');
+    if (!Number.isInteger(seat.slot) || seat.slot < 1 || seat.slot > MAX_LLM_SEATS) {
+      throw new Error(`大模型机器人座位号必须为 1-${MAX_LLM_SEATS} 的整数`);
     }
     if (slots.has(seat.slot)) {
-      throw new Error(`大模型机器人槽位重复：${seat.slot}`);
+      throw new Error(`大模型机器人座位号重复：${seat.slot}`);
     }
     slots.add(seat.slot);
     if (!seat.enabled) continue;
     enabledLlmCount += 1;
     if (!seat.baseUrl || !seat.baseUrl.trim()) {
-      throw new Error(`大模型${seat.slot === 1 ? '①' : '②'}的 Base URL 不能为空`);
+      throw new Error(`大模型「${seat.name?.trim() || `#${seat.slot}`}」的 Base URL 不能为空`);
     }
     if (!seat.model || !seat.model.trim()) {
-      throw new Error(`大模型${seat.slot === 1 ? '①' : '②'}的模型名称不能为空`);
+      throw new Error(`大模型「${seat.name?.trim() || `#${seat.slot}`}」的模型名称不能为空`);
     }
   }
   if (enabledLlmCount > config.playerCount - 1) {
     throw new Error(
-      `当前 ${config.playerCount} 人桌放不下 ${enabledLlmCount} 个大模型机器人，请增加人数或关闭一个大模型`,
+      `当前 ${config.playerCount} 人桌放不下 ${enabledLlmCount} 个大模型机器人，请增加人数或关闭一些大模型`,
     );
   }
 }
@@ -75,10 +75,11 @@ export function createTable(overrides: Partial<TableConfig> = {}): TableState {
   config.llmSeats = (config.llmSeats ?? []).map((seat) => ({ ...seat }));
   validateTableConfig(config);
 
+  const humanName = config.humanName?.trim() || '你';
   const players: TablePlayer[] = [
     {
       id: 0,
-      name: '你',
+      name: humanName,
       isHuman: true,
       stack: config.startingStack,
       difficulty: config.difficulty,
@@ -86,14 +87,14 @@ export function createTable(overrides: Partial<TableConfig> = {}): TableState {
     },
   ];
 
-  // 加入牌局的本地大模型机器人（按槽位顺序入座）。
+  // 加入牌局的本地大模型机器人（按座位号顺序入座）。
   const enabledLlmSeats = config.llmSeats
     .filter((seat) => seat.enabled)
     .sort((a, b) => a.slot - b.slot);
   for (const seat of enabledLlmSeats) {
     players.push({
       id: players.length,
-      name: seat.name?.trim() || `大模型${seat.slot === 1 ? '①' : '②'}`,
+      name: seat.name?.trim() || `大模型#${seat.slot}`,
       isHuman: false,
       stack: config.startingStack,
       difficulty: config.difficulty,
@@ -102,12 +103,13 @@ export function createTable(overrides: Partial<TableConfig> = {}): TableState {
     });
   }
 
-  // 剩余座位由本地算法机器人补齐。
+  // 剩余座位由本地算法机器人补齐，名称可由配置自由指定。
   const localBotCount = config.playerCount - players.length;
   for (let i = 0; i < localBotCount; i++) {
+    const customName = config.localBotNames?.[i]?.trim();
     players.push({
       id: players.length,
-      name: BOT_NAMES[i] ?? `机器人${i + 1}`,
+      name: customName || BOT_NAMES[i] || `机器人${i + 1}`,
       isHuman: false,
       stack: config.startingStack,
       difficulty: config.difficulty,

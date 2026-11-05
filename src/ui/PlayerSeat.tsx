@@ -20,7 +20,7 @@ export interface SeatData {
   holeCards: Card[];
   difficulty?: Difficulty;
   kind?: PlayerKind;
-  llmSlot?: 1 | 2;
+  llmSlot?: number;
 }
 
 export interface SeatPosition {
@@ -40,6 +40,8 @@ interface PlayerSeatProps {
   winAmount: number;
   showdown: ShowdownEntry | null;
   showBet: boolean;
+  /** 大模型玩家的神态/语句（开启该功能时显示在座位气泡）。 */
+  talk?: string;
 }
 
 export function PlayerSeat({
@@ -54,6 +56,7 @@ export function PlayerSeat({
   winAmount,
   showdown,
   showBet,
+  talk,
 }: PlayerSeatProps) {
   const className = [
     'seat',
@@ -105,6 +108,12 @@ export function PlayerSeat({
         </div>
         {isActing && <span className="seat__pulse" aria-hidden="true" />}
       </div>
+
+      {talk && (
+        <div className="seat__talk" role="status" title={talk}>
+          {talk}
+        </div>
+      )}
 
       <div className={`seat__cards${seat.status === 'folded' ? ' seat__cards--folded' : ''}`}>
         {seat.holeCards.length === 0 ? (

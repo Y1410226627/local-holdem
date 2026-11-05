@@ -224,7 +224,7 @@ function interfacePage(): ReactNode {
         </li>
         <li>
           <strong>设置栏：</strong>难度、人数、速度、随机种子、调试模式、训练参数开关、
-          新手教程、大模型设置，以及「新局 / 下一手 / 重置筹码 / 导出历史」。
+          新手教程、AI 玩家设置，以及「新局 / 下一手 / 重置筹码 / 导出历史」。
         </li>
       </ul>
       <div className="tutorial-callout">
@@ -257,24 +257,27 @@ function aiPage(): ReactNode {
         ))}
       </div>
       <div className="tutorial-callout tutorial-callout--llm">
-        <strong>本地大模型机器人（最多 2 个）：</strong>
+        <strong>大模型玩家、名字与 AI 军师（全部可选）：</strong>
         <p>
-          在设置栏点「大模型设置」，弹窗会自动扫描本机常见端口上的 Ollama / LM Studio / vLLM /
-          llama.cpp 服务，识别到服务后可直接点「填入槽位①/②」自动带出 Base URL 与模型名；
-          也可以手动填写显示名称、Base URL、模型名、API Key、温度与超时。默认示例：Ollama{' '}
-          <code>http://127.0.0.1:11434/v1</code> + <code>qwen2.5:7b</code>；LM Studio{' '}
-          <code>http://127.0.0.1:1234/v1</code> + <code>local-model</code>。
+          设置栏点「AI 玩家设置」可以添加多个大模型玩家（数量由人数决定：2 人桌最多 1 个，6 人桌最多
+          5 个）。每个玩家都可以自由编写<strong>名称</strong>和<strong>人物设定</strong>（性格 / 说话风格
+          / 打法倾向），人物设定会写进提示词。弹窗会自动扫描本机 Ollama / LM Studio / vLLM /
+          llama.cpp 服务，也可手动填写 Base URL、模型名、API Key、温度、超时与输出 token 上限。
         </p>
         <p>
-          大模型只会收到公开信息与自己的底牌，不会看到对手底牌。每次行动失败或超时，
-          UI 会自动回退到本地算法并继续牌局，绝不会卡死。每手结束后，模型会把自己这手的
-          动作与结果写入浏览器本地「对局记忆」，供下一手参考，可在设置里单独清空。
+          <strong>省 token：</strong>提示词是精简英文，动作要求一行短键 JSON；「神态语句」开关打开后，
+          模型行动时会附带一句短台词（会多消耗少量 token）；「AI 军师」是你自己的中文教练兼聊天伙伴，
+          只在点「分析当前局势」或发送消息时调用，可随时关闭。
         </p>
         <p>
-          Ollama 需设置环境变量 <code>OLLAMA_ORIGINS=*</code>；LM Studio 需在本地服务器设置中
-          开启 CORS。若自动扫描提示「未发现服务」，通常是服务没启动、端口不同或 CORS 未开启，
-          可以手动填写 Base URL 并点「测试连接」。人数不足时（例如 2 人桌启用 2 个大模型）
-          会给出中文提示，请增加人数或关闭一个槽位。修改后点「新局」重新入座。
+          大模型只会收到公开信息与自己的底牌，不会看到对手底牌。行动失败或超时会自动回退本地算法并继续
+          牌局；思考型模型如果因“思考”耗尽 token 返回空内容，会自动重试并放宽上限。每手结束后，模型会把
+          自己这手的动作与结果写入浏览器本地「对局记忆」（每个模型最多 80 条），可在设置里单独清空。
+        </p>
+        <p>
+          「AI 玩家设置 → 玩家名称」里，你自己的名字和本地算法机器人的名字也都可以自由修改。
+          Ollama 需设置环境变量 <code>OLLAMA_ORIGINS=*</code>；LM Studio 需在本地服务器设置中开启 CORS。
+          人数不足时会给出中文提示，请增加人数或减少启用的大模型玩家。修改后点「新局」重新入座。
         </p>
       </div>
     </>
@@ -313,7 +316,7 @@ function trainingPage(): ReactNode {
         <div>
           <h3 className="tutorial-h3">本地数据说明</h3>
           <ul className="tutorial-list">
-            <li>教程完成标记、大模型设置、训练开关保存在浏览器 localStorage。</li>
+            <li>教程完成标记、AI 玩家设置、训练开关保存在浏览器 localStorage。</li>
             <li>大模型对局记忆仅保存在本机浏览器，最多保留最近若干条。</li>
             <li>不登录、不上传、不使用外部付费服务。</li>
           </ul>
@@ -322,7 +325,7 @@ function trainingPage(): ReactNode {
           <h3 className="tutorial-h3">推荐流程</h3>
           <ul className="tutorial-list">
             <li>先选人数与难度（2–6 人，四档难度）。</li>
-            <li>需要大模型时先在「大模型设置」测试连接，再点「开始对局」。</li>
+            <li>需要大模型时先在「AI 玩家设置」测试连接，再点「开始对局」。</li>
             <li>新手先用「入门 / 普通」难度，熟悉位置与下注尺度。</li>
             <li>想复盘时打开「调试模式」与「牌局历史」。</li>
           </ul>
