@@ -9,6 +9,7 @@
  * AI 接口只接受 PlayerView，从类型层面杜绝人机读取对手底牌。
  */
 import type {
+  PublicPlayerStats,
   ActionRecord,
   Card,
   Difficulty,
@@ -33,6 +34,8 @@ export interface PublicPlayerView {
   llmSlot?: number;
   /** 机器人风格原型 id（0..5）；人类无。 */
   styleId?: number;
+  /** 跨手公开行为统计（只由公开动作推导）。 */
+  stats?: PublicPlayerStats;
   stack: number;
   committedThisStreet: number;
   totalCommitted: number;
@@ -43,6 +46,8 @@ export interface PublicPlayerView {
 export interface SelfPlayerView extends PublicPlayerView {
   holeCards: Card[];
   canRaise: boolean;
+  /** 当前情绪（-2 上头 .. +2 自信，0 平稳）：只有自己知道。 */
+  mood?: number;
 }
 
 export interface PlayerLogView {
@@ -88,6 +93,7 @@ export function buildPlayerView(hand: HandState, viewerId: number, seed: string)
     kind: player.kind,
     llmSlot: player.llmSlot,
     styleId: player.styleId,
+    stats: player.stats,
     stack: player.stack,
     committedThisStreet: player.committedThisStreet,
     totalCommitted: player.totalCommitted,
@@ -126,6 +132,7 @@ export function buildPlayerView(hand: HandState, viewerId: number, seed: string)
       ...publicPlayers[viewerIndex],
       holeCards: viewer.holeCards.map((card) => ({ ...card })),
       canRaise: viewer.canRaise,
+      mood: viewer.mood,
     },
     legal,
     actions: hand.actions.map((record) => ({

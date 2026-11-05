@@ -1171,6 +1171,14 @@ select.field__control option {
   font-weight: 700;
 }
 
+.seat__stats {
+  margin-top: 1px;
+  font-size: 9.5px;
+  color: rgba(160, 190, 175, 0.85);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .seat__pulse {
   width: 8px;
   height: 8px;

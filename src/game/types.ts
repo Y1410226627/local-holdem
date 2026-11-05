@@ -78,6 +78,36 @@ export interface LlmSeatConfig {
   enabled: boolean;
 }
 
+/** 公开的对手行为统计（跨手累计；只由公开动作推导，不含底牌信息）。 */
+export interface PublicPlayerStats {
+  /** 参与的手数。 */
+  hands: number;
+  /** 自愿入池率 0..1（翻牌前跟注 / 加注 / 全下，不含盲注）。 */
+  vpipRate: number;
+  /** 翻牌前加注率 0..1。 */
+  pfrRate: number;
+  /** 攻击性 (下注 + 加注) / 跟注，0..5。 */
+  aggression: number;
+  /** 面对下注时的弃牌率 0..1；样本不足为 null。 */
+  foldToBetRate: number | null;
+  /** 本会话累计净赢筹码。 */
+  netChips: number;
+}
+
+/** 引擎内部原始统计计数（不直接暴露给 AI）。 */
+export interface PlayerStatsRaw {
+  hands: number;
+  vpip: number;
+  pfr: number;
+  bets: number;
+  raises: number;
+  calls: number;
+  folds: number;
+  facedBet: number;
+  foldedToBet: number;
+  netChips: number;
+}
+
 /** 玩家动作。下注/加注的 amount 表示“加到”的街道累计投入（raise-to），而非增量。 */
 export type PlayerAction =
   | { type: 'fold' }
@@ -100,6 +130,10 @@ export interface PlayerState {
   llmSlot?: number;
   /** 机器人风格原型 id（0..BOT_STYLE_COUNT-1；体验随机层使用，人类为 undefined）。 */
   styleId?: number;
+  /** 本手开始时的公开行为统计快照（跨手累计）。 */
+  stats?: PublicPlayerStats;
+  /** 当前情绪（-2 上头 .. +2 自信，0 平稳）；只对本玩家可见。 */
+  mood?: number;
   /** 身后剩余筹码。 */
   stack: number;
   /** 底牌。任意时刻都应通过 PlayerView 过滤后再交给 AI。 */
@@ -270,6 +304,10 @@ export interface TablePlayer {
   llmSlot?: number;
   /** 机器人风格原型 id。 */
   styleId?: number;
+  /** 跨手累计的原始统计（不直接暴露给 AI）。 */
+  statsRaw?: PlayerStatsRaw;
+  /** 当前情绪（-2..2），跨手更新。 */
+  mood?: number;
 }
 
 export interface HandHistoryPlayer {

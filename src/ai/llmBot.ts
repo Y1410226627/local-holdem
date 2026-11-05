@@ -218,6 +218,33 @@ function formatSeats(view: PlayerView): string {
     .join('; ');
 }
 
+/** 公开跨手统计数据（足够样本时）→ 一行紧凑英文画像，供大模型参考。 */
+function formatOpponentStats(view: PlayerView): string | null {
+  const rows = view.players
+    .filter((player) => player.id !== view.viewerId && player.stats && player.stats.hands >= 2)
+    .slice(0, 6)
+    .map((player) => {
+      const stats = player.stats;
+      if (!stats) return '';
+      const fold =
+        stats.foldToBetRate === null ? '-' : Math.round(stats.foldToBetRate * 100) + '%';
+      return (
+        player.name +
+        ' VPIP' +
+        Math.round(stats.vpipRate * 100) +
+        ' PFR' +
+        Math.round(stats.pfrRate * 100) +
+        ' AF' +
+        stats.aggression.toFixed(1) +
+        ' F2B' +
+        fold
+      );
+    })
+    .filter((row) => row.length > 0);
+  if (rows.length === 0) return null;
+  return 'READS ' + rows.join('; ');
+}
+
 /* ------------------------------------------------------------------ */
 /* 提示词                                                              */
 /* ------------------------------------------------------------------ */
@@ -272,6 +299,9 @@ export function buildLlmPrompt(
     const hints = [...formatExamples(view), ...memoryPromptLines(config.slot, MAX_MEMORY_LINES)];
     if (hints.length > 0) userLines.push(`HINTS\n${hints.join('\n')}`);
   }
+
+  const reads = formatOpponentStats(view);
+  if (reads) userLines.push(reads);
 
   return { system: systemLines.join('\n'), user: userLines.join('\n') };
 }

@@ -4,6 +4,7 @@ import type {
   Difficulty,
   PlayerKind,
   PlayerStatus,
+  PublicPlayerStats,
   ShowdownEntry,
 } from '../game/types';
 import { DIFFICULTY_LABELS } from '../game/types';
@@ -21,6 +22,8 @@ export interface SeatData {
   difficulty?: Difficulty;
   kind?: PlayerKind;
   llmSlot?: number;
+  /** 跨手公开行为统计（手数够多时显示 VPIP / 攻击性画像）。 */
+  stats?: PublicPlayerStats;
 }
 
 export interface SeatPosition {
@@ -58,6 +61,26 @@ export function PlayerSeat({
   showBet,
   talk,
 }: PlayerSeatProps) {
+  const stats = seat.stats;
+  const showStats = stats !== undefined && stats.hands >= 3;
+  const vpipPct = stats ? Math.round(stats.vpipRate * 100) : 0;
+  const pfrPct = stats ? Math.round(stats.pfrRate * 100) : 0;
+  const afText = stats ? stats.aggression.toFixed(1) : '0.0';
+  const foldText =
+    stats && stats.foldToBetRate !== null ? Math.round(stats.foldToBetRate * 100) + '%' : '—';
+  const statsTitle = stats
+    ? '跨手画像（' +
+      stats.hands +
+      ' 手）：VPIP ' +
+      vpipPct +
+      '% · PFR ' +
+      pfrPct +
+      '% · 攻击性 ' +
+      afText +
+      ' · 面对下注弃牌 ' +
+      foldText
+    : '';
+
   const className = [
     'seat',
     seat.isHuman ? 'seat--human' : '',
@@ -105,6 +128,11 @@ export function PlayerSeat({
           <div className="seat__stack">
             筹码 <strong>{formatChips(seat.stack)}</strong>
           </div>
+          {showStats && (
+            <div className="seat__stats" title={statsTitle}>
+              VPIP {vpipPct}% · AF {afText}
+            </div>
+          )}
         </div>
         {isActing && <span className="seat__pulse" aria-hidden="true" />}
       </div>

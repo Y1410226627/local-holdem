@@ -8,6 +8,7 @@
  */
 import type {
   ActionType,
+  PublicPlayerStats,
   Card,
   Difficulty,
   HandResult,
@@ -46,6 +47,8 @@ export interface CreateHandPlayerInput {
   kind?: PlayerKind;
   llmSlot?: number;
   styleId?: number;
+  stats?: PublicPlayerStats;
+  mood?: number;
 }
 
 export interface CreateHandOptions {
@@ -450,6 +453,8 @@ export function createHand(options: CreateHandOptions): HandState {
     kind: input.kind,
     llmSlot: input.llmSlot,
     styleId: input.styleId,
+    stats: input.stats,
+    mood: input.mood,
     stack: input.stack,
     holeCards: [],
     committedThisStreet: 0,

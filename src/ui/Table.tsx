@@ -1,5 +1,6 @@
 /** 牌桌：椭圆桌面、公共牌、底池、环绕座位与结算信息。 */
-import type { HandState, ShowdownEntry, TableState } from '../game/types';
+import type { HandState, PublicPlayerStats, ShowdownEntry, TableState } from '../game/types';
+import { toPublicStats } from '../game/stateMachine';
 import { DIFFICULTY_LABELS } from '../game/types';
 import { formatChips, resultSummary, STREET_LABELS } from './format';
 import { PlayerSeat, type SeatData, type SeatPosition } from './PlayerSeat';
@@ -132,6 +133,7 @@ export function Table({
       difficulty: tablePlayer.difficulty,
       kind: handPlayer?.kind ?? tablePlayer.kind,
       llmSlot: handPlayer?.llmSlot ?? tablePlayer.llmSlot,
+      stats: toPublicStats(tablePlayer.statsRaw),
     };
   });
 

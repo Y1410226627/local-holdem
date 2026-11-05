@@ -10,13 +10,116 @@ import type {
   TablePlayer,
   TableState,
 } from './types';
-import { DEFAULT_CONFIG, MAX_LLM_SEATS, MAX_PLAYERS, MIN_PLAYERS } from './types';
+import {
+  DEFAULT_CONFIG,
+  MAX_LLM_SEATS,
+  MAX_PLAYERS,
+  MIN_PLAYERS,
+  type PlayerStatsRaw,
+  type PublicPlayerStats,
+} from './types';
 import { assignBotStyleIds } from './cards';
 import { IllegalActionError, createHand, getLegalActions, playAction } from './gameEngine';
 
 export const BOT_NAMES = ['阿豪', '小雅', '老陈', '莉莉', '大鹏'];
 
 export const DEFAULT_BOT_NAMES = BOT_NAMES;
+
+/** 空的原始统计。 */
+export function createEmptyStatsRaw(): PlayerStatsRaw {
+  return {
+    hands: 0,
+    vpip: 0,
+    pfr: 0,
+    bets: 0,
+    raises: 0,
+    calls: 0,
+    folds: 0,
+    facedBet: 0,
+    foldedToBet: 0,
+    netChips: 0,
+  };
+}
+
+/** 原始统计 → 公开统计（样本不足时返回 undefined）。 */
+export function toPublicStats(raw: PlayerStatsRaw | undefined): PublicPlayerStats | undefined {
+  if (!raw || raw.hands <= 0) return undefined;
+  return {
+    hands: raw.hands,
+    vpipRate: raw.vpip / raw.hands,
+    pfrRate: raw.pfr / raw.hands,
+    aggression: Math.min(5, (raw.bets + raw.raises) / Math.max(1, raw.calls)),
+    foldToBetRate: raw.facedBet > 0 ? raw.foldedToBet / raw.facedBet : null,
+    netChips: raw.netChips,
+  };
+}
+
+/** 本手结束后更新每个玩家的跨手统计与情绪（只由公开动作 / 收支推导）。 */
+function updateSessionStats(table: TableState): void {
+  const hand = table.hand;
+  if (!hand) return;
+  const raws = new Map<number, PlayerStatsRaw>();
+  for (const player of table.players) {
+    raws.set(player.id, player.statsRaw ? { ...player.statsRaw } : createEmptyStatsRaw());
+  }
+
+  let street = '';
+  let streetBet = 0;
+  // VPIP / PFR 按「手」计一次：同一手翻牌前的多次跟注 / 加注不重复累计。
+  const vpipMark = new Set<number>();
+  const pfrMark = new Set<number>();
+  for (const record of hand.actions) {
+    if (record.street !== street) {
+      street = record.street;
+      streetBet = 0;
+    }
+    const raw = raws.get(record.actorId);
+    if (!raw) continue;
+    const action = record.action;
+    if (street === 'preflop') {
+      const vpipAction =
+        action.type === 'call' || action.type === 'bet' || action.type === 'raise' || action.type === 'allin';
+      const raiseAction = action.type === 'bet' || action.type === 'raise' || action.type === 'allin';
+      if (vpipAction && !vpipMark.has(record.actorId)) {
+        raw.vpip += 1;
+        vpipMark.add(record.actorId);
+      }
+      if (raiseAction && !pfrMark.has(record.actorId)) {
+        raw.pfr += 1;
+        pfrMark.add(record.actorId);
+      }
+    }
+    if (action.type === 'bet') raw.bets += 1;
+    else if (action.type === 'raise') raw.raises += 1;
+    else if (action.type === 'call') raw.calls += 1;
+    else if (action.type === 'fold') raw.folds += 1;
+
+    const facing = streetBet > 0 && (action.type === 'fold' || action.type === 'call' || action.type === 'raise' || action.type === 'allin');
+    if (facing) {
+      raw.facedBet += 1;
+      if (action.type === 'fold') raw.foldedToBet += 1;
+    }
+    if (action.type === 'bet' || action.type === 'raise' || action.type === 'allin') {
+      streetBet = Math.max(streetBet, record.toAmount);
+    }
+  }
+
+  for (const player of table.players) {
+    const handPlayer = hand.players.find((item) => item.id === player.id);
+    if (!handPlayer || handPlayer.status === 'out') continue;
+    const raw = raws.get(player.id);
+    if (!raw) continue;
+    raw.hands += 1;
+    const starting = table.handStartStacks[player.id] ?? player.stack;
+    const net = player.stack - starting;
+    raw.netChips += net;
+    player.statsRaw = raw;
+    const delta = Math.max(-1.5, Math.min(1.5, net / Math.max(1, table.config.bigBlind * 5)));
+    const previous = player.mood ?? 0;
+    player.mood = Math.max(-2, Math.min(2, previous * 0.6 + delta));
+  }
+}
+
 
 export function validateTableConfig(config: TableConfig): void {
   if (!Number.isInteger(config.playerCount) || config.playerCount < MIN_PLAYERS || config.playerCount > MAX_PLAYERS) {
@@ -125,6 +228,8 @@ export function createTable(overrides: Partial<TableConfig> = {}): TableState {
   );
   for (const player of players) {
     if (!player.isHuman) player.styleId = styleIds.get(player.id);
+    player.statsRaw = createEmptyStatsRaw();
+    player.mood = 0;
   }
 
   return {
@@ -169,6 +274,7 @@ function finalizeHand(table: TableState): void {
   for (let i = 0; i < table.players.length; i++) {
     table.players[i].stack = hand.players[i].stack;
   }
+  updateSessionStats(table);
 
   const history: HandHistory = {
     handNo: hand.handNo,
@@ -242,6 +348,8 @@ export function startNextHand(table: TableState): TableState {
       kind: player.kind,
       llmSlot: player.llmSlot,
       styleId: player.styleId,
+      stats: toPublicStats(player.statsRaw),
+      mood: player.mood,
     })),
     buttonIndex,
     smallBlind: next.config.smallBlind,
@@ -325,6 +433,8 @@ export function resetChips(table: TableState, options: ResetChipsOptions = {}): 
     kind: player.kind,
     llmSlot: player.llmSlot,
     styleId: player.styleId,
+    statsRaw: createEmptyStatsRaw(),
+    mood: 0,
   }));
   // 注入新种子 = 新牌局：重新打乱风格分配，让每个新局的对手“性格组合”不同。
   if (injectedSeed) {

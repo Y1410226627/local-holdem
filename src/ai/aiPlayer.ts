@@ -23,6 +23,15 @@ import {
   styleLabel,
   variationRateFor,
 } from './style';
+import {
+  applyExploitation,
+  applyMoodToProfile,
+  chooseEvBetFraction,
+  humanMistakeRate,
+  moodLabel,
+  summarizeOpponents,
+  type OpponentSummary,
+} from './humanModel';
 import { estimateEquity, type RangeWeight } from './equity';
 import {
   analyzePostflop,
@@ -33,6 +42,7 @@ import {
   preflopThresholdsForProfile,
   POSITION_LABELS,
   type PostflopAnalysis,
+  type PreflopThresholds,
 } from './rangeModel';
 
 export interface AIDecisionOptions {
@@ -81,6 +91,10 @@ interface DecisionContext {
   profile: DifficultyProfile;
   rng: () => number;
   potOdds: number;
+  /** 当前情绪（-2 上头 .. +2 自信，0 平稳）。 */
+  mood: number;
+  /** 跨手对手公开统计汇总（困难 / 专家据此调整策略）。 */
+  opponents: OpponentSummary;
   /** 风格原型 id（体验随机层；undefined 时不施加风格）。 */
   styleId?: number;
 }
@@ -97,6 +111,10 @@ interface OpponentRead {
 /* ------------------------------------------------------------------ */
 /* 通用辅助                                                            */
 /* ------------------------------------------------------------------ */
+
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
 
 function potOddsOf(view: PlayerView, legal: LegalActions): number {
   const cost = Math.max(0, legal.callAmount);
@@ -182,6 +200,31 @@ function pickSize(rng: () => number, sizes: readonly number[], styleId?: number)
   return sizes[sampleSizeIndex(rng, sizes, styleId)] ?? sizes[0];
 }
 
+/**
+ * 真人化：有对手统计样本时，按「fold-equity 近似 EV」挑下注尺度；
+ * 没样本时仍按风格偏好随机挑尺度（保持种子可复现）。
+ */
+function pickBetFraction(
+  ctx: DecisionContext,
+  equity: number,
+  fractions: readonly number[],
+): number {
+  const { view, legal, rng, opponents } = ctx;
+  if (opponents.count > 0 && opponents.confidence > 0 && fractions.length > 0) {
+    const choice = chooseEvBetFraction({
+      fractions,
+      pot: view.pot,
+      equity,
+      currentBet: legal.currentBet,
+      legal,
+      foldToBetRate: opponents.avgFoldToBet,
+      opponentCount: countOpponents(view),
+    });
+    if (choice) return choice.fraction;
+  }
+  return pickSize(rng, fractions, ctx.styleId);
+}
+
 function countOpponents(view: PlayerView): number {
   return view.players.filter(
     (player) =>
@@ -195,6 +238,17 @@ function countLimpers(view: PlayerView): number {
   for (const record of view.actions) {
     if (record.street !== view.street) continue;
     if (record.action.type === 'call') count++;
+  }
+  return count;
+}
+
+/** 本街已经出现的进攻动作次数（用于翻牌前面对加注时收紧范围）。 */
+function countRaisesThisStreet(view: PlayerView): number {
+  let count = 0;
+  for (const record of view.actions) {
+    if (record.street !== view.street) continue;
+    const type = record.action.type;
+    if (type === 'bet' || type === 'raise' || type === 'allin') count++;
   }
   return count;
 }
@@ -242,7 +296,26 @@ function decidePreflop(
   const facingRaise = view.currentBet > view.bigBlind;
   const position = positionOf(view);
   const positionText = POSITION_LABELS[position];
-  const thresholds = preflopThresholdsForProfile(profile, position);
+  // 真人化：面对 3-bet / 多人加注时收紧范围；晚位对多人溜入便宜看牌时小幅放宽。
+  const baseThresholds = preflopThresholdsForProfile(profile, position);
+  const raiseCount = countRaisesThisStreet(view);
+  const tighten = facingRaise
+    ? Math.min(0.2, 0.05 + Math.max(0, raiseCount - 1) * 0.045)
+    : 0;
+  const limpers = countLimpers(view);
+  const loosen = !facingRaise && limpers >= 2 && position === 'late' ? 0.03 : 0;
+  const thresholds: PreflopThresholds =
+    tighten === 0 && loosen === 0
+      ? baseThresholds
+      : {
+          play: clamp01(baseThresholds.play + tighten - loosen),
+          raise: clamp01(
+            Math.max(baseThresholds.play + tighten - loosen, baseThresholds.raise + tighten),
+          ),
+          threeBet: clamp01(
+            Math.max(baseThresholds.raise + tighten, baseThresholds.threeBet + tighten),
+          ),
+        };
 
   if (difficulty === 'beginner') {
     // 入门 AI：完全按起手牌强度查表，不看位置；只小额跟注，极少加注。
@@ -493,7 +566,7 @@ function decideHardPostflop(
   if (legal.canCheck) {
     const bet = buildAggressive(
       legal,
-      targetFromFraction(view, legal, pickSize(rng, betSizes, ctx.styleId)),
+      targetFromFraction(view, legal, pickBetFraction(ctx, equity, betSizes)),
     );
     if (equity >= 0.74 && bet) {
       action = bet;
@@ -514,7 +587,7 @@ function decideHardPostflop(
   } else {
     const raise = buildAggressive(
       legal,
-      targetFromFraction(view, legal, pickSize(rng, profile.postflop.raiseSizes, ctx.styleId)),
+      targetFromFraction(view, legal, pickBetFraction(ctx, equity, profile.postflop.raiseSizes)),
     );
     if (equity >= 0.78 && raise && rng() < 0.58) {
       action = raise;
@@ -545,19 +618,14 @@ function decideHardPostflop(
   return { action, reasoning };
 }
 
-function pickExpertSize(
-  view: PlayerView,
-  rng: () => number,
-  strong: boolean,
-  styleId?: number,
-): number {
+function pickExpertBetFraction(ctx: DecisionContext, equity: number): number {
+  const { view, rng } = ctx;
   const sizes = DIFFICULTY_PROFILES.expert.postflop.betSizes;
-  if (view.street === 'river' && strong && rng() < 0.3) {
+  if (view.street === 'river' && equity >= 0.7 && rng() < 0.3) {
     return sizes[sizes.length - 1];
   }
   const limit = view.street === 'river' ? sizes.length : Math.max(1, sizes.length - 1);
-  const subset = sizes.slice(0, limit);
-  return subset[sampleSizeIndex(rng, subset, styleId)] ?? sizes[0];
+  return pickBetFraction(ctx, equity, sizes.slice(0, limit));
 }
 
 function multiStreetPlan(
@@ -603,7 +671,7 @@ function decideExpertPostflop(
   let note: string;
 
   if (legal.canCheck) {
-    const size = pickExpertSize(view, rng, equity >= 0.7, ctx.styleId);
+    const size = pickExpertBetFraction(ctx, equity);
     const bet = buildAggressive(legal, targetFromFraction(view, legal, size));
     if (equity >= 0.78) {
       if (spr <= 2.5 && legal.canAllIn && legal.maxRaiseTo > legal.currentBet) {
@@ -636,7 +704,7 @@ function decideExpertPostflop(
   } else {
     const raise = buildAggressive(
       legal,
-      targetFromFraction(view, legal, pickExpertSize(view, rng, equity >= 0.7, ctx.styleId)),
+      targetFromFraction(view, legal, pickExpertBetFraction(ctx, equity)),
     );
     if (
       (equity >= 0.82 || (spr <= 2 && equity >= 0.6)) &&
@@ -702,17 +770,27 @@ function buildOpponentReads(view: PlayerView): OpponentRead[] {
       }
     }
 
+    const stats = player.stats;
     let range: RangeWeight | null = null;
     if (raises > 0) {
       // 加注越多 → 越偏向强范围（拒绝采样时弱牌接受率极低）。
-      const exponent = 1.15 + Math.min(3, raises) * 0.18;
+      let exponent = 1.15 + Math.min(3, raises) * 0.18;
+      if (stats && stats.hands > 0) {
+        // 公开统计：越松 / 越爱主动加注，其加注范围越宽；越紧越窄。
+        exponent -= (stats.vpipRate - 0.4) * 0.5;
+        exponent -= (stats.pfrRate - 0.15) * 0.6;
+        exponent = Math.max(0.7, Math.min(3.2, exponent));
+      }
       range = (first, second) => {
         const strength = preflopStrengthOf(first, second);
         return Math.min(1, 0.03 + Math.pow(strength, exponent) * 1.15);
       };
     } else if (calls > 0) {
-      // 跟注多 → 偏向中等范围（两端权重低）。
-      const center = 0.5 + Math.min(0.15, calls * 0.02);
+      // 跟注多 → 偏向中等范围（两端权重低）；松玩家的跟注范围更宽。
+      let center = 0.5 + Math.min(0.15, calls * 0.02);
+      if (stats && stats.hands > 0) {
+        center = Math.max(0.35, Math.min(0.7, center + (stats.vpipRate - 0.4) * 0.25));
+      }
       range = (first, second) => {
         const strength = preflopStrengthOf(first, second);
         const distance = Math.abs(strength - center);
@@ -781,6 +859,93 @@ function maybeStyleVariation(
   return null;
 }
 
+/**
+ * 真人化失误层：按难度 + 情绪以低概率做出「不够最优但像真人」的动作。
+ * 入门概率最高（约 1/5），专家最低（约 1/100）；所有动作仍经合法性检查。
+ * 导出仅供测试 / 调试使用。
+ */
+export function maybeHumanMistake(
+  ctx: DecisionContext,
+  action: PlayerAction,
+  reference: number | undefined,
+  hasDraw: boolean,
+): { action: PlayerAction; note: string } | null {
+  const { view, legal, difficulty, rng } = ctx;
+  if (view.board.length < 3) return null;
+  const rate = humanMistakeRate(difficulty, ctx.mood);
+  if (rate <= 0 || rng() >= rate) return null;
+  const cost = legal.callAmount;
+  const potFraction = cost / Math.max(1, view.pot);
+
+  // 1) 小注忍不住跟（粘性 / 好奇心）：入门、普通最常见。
+  if (action.type === 'fold' && legal.canCall) {
+    const sticky = cost > 0 && (cost <= view.bigBlind * 2 || potFraction <= 0.18);
+    if (sticky && (difficulty === 'beginner' || difficulty === 'normal')) {
+      return { action: { type: 'call' }, note: '（真人式失误：小注忍不住跟注）' };
+    }
+    if (hasDraw && potFraction <= 0.35) {
+      return { action: { type: 'call' }, note: '（真人式失误：追听牌没算赔率）' };
+    }
+    if (
+      (difficulty === 'hard' || difficulty === 'expert') &&
+      reference !== undefined &&
+      reference >= 0.3 &&
+      reference <= 0.44 &&
+      potFraction <= 0.45
+    ) {
+      return { action: { type: 'call' }, note: '（真人式失误：忍不住抓诈）' };
+    }
+  }
+
+  // 2) 该价值下注时手软过牌（入门 / 普通）。
+  if (
+    (action.type === 'bet' || action.type === 'raise') &&
+    legal.canCheck &&
+    (difficulty === 'beginner' || difficulty === 'normal')
+  ) {
+    return { action: { type: 'check' }, note: '（真人式失误：错过价值下注）' };
+  }
+
+  // 3) 被大注吓退：边缘牌面对大注弃牌（入门 / 普通更常见）。
+  if (
+    action.type === 'call' &&
+    legal.canFold &&
+    potFraction >= 0.55 &&
+    reference !== undefined &&
+    reference < 0.55 &&
+    (difficulty === 'beginner' || difficulty === 'normal' || rng() < 0.5)
+  ) {
+    return { action: { type: 'fold' }, note: '（真人式失误：被大注吓退）' };
+  }
+
+  // 4) 上头乱加注：负情绪时偶尔用弱牌打大底池。
+  if (
+    ctx.mood <= -0.8 &&
+    (action.type === 'check' || action.type === 'call') &&
+    (legal.canBet || legal.canRaise) &&
+    reference !== undefined &&
+    reference < 0.45 &&
+    rng() < 0.45
+  ) {
+    const target = buildAggressive(legal, targetFromFraction(view, legal, 0.8));
+    if (target) {
+      return { action: target, note: '（真人式失误：上头乱加注）' };
+    }
+  }
+
+  // 3) 强牌慢玩过头（入门）。
+  if (
+    difficulty === 'beginner' &&
+    reference !== undefined &&
+    reference >= 0.75 &&
+    legal.canCheck &&
+    action.type !== 'check'
+  ) {
+    return { action: { type: 'check' }, note: '（真人式失误：强牌慢玩过头）' };
+  }
+  return null;
+}
+
 /* ------------------------------------------------------------------ */
 /* 主入口                                                              */
 /* ------------------------------------------------------------------ */
@@ -811,10 +976,16 @@ export async function decide(
 
   const baseProfile = options.profileOverride ?? getDifficultyProfile(difficulty);
   const styleId = view.self.styleId;
-  // profileOverride 用于训练 / 对照评估：保持参数原样，不叠加风格随机层。
-  const profile = options.profileOverride
+  const mood = options.profileOverride ? 0 : (view.self.mood ?? 0);
+  const opponents = summarizeOpponents(view);
+  // profileOverride 用于训练 / 对照评估：保持参数原样，不叠加风格 / 情绪 / 读人层。
+  let profile = options.profileOverride
     ? baseProfile
     : applyStyleVariant(baseProfile, styleId);
+  if (!options.profileOverride) {
+    profile = applyMoodToProfile(profile, mood, difficulty);
+    profile = applyExploitation(profile, opponents, difficulty);
+  }
   const rng = derivedRng(view.seed, difficulty, view.actions.length, styleId ?? 0);
   const potOdds = potOddsOf(view, legal);
   const ctx: DecisionContext = {
@@ -824,6 +995,8 @@ export async function decide(
     profile,
     rng,
     potOdds,
+    mood,
+    opponents,
     styleId: options.profileOverride ? undefined : styleId,
   };
 
@@ -833,6 +1006,7 @@ export async function decide(
   let equity: number | undefined;
   let iterations: number | undefined;
   let variationReference: number | undefined;
+  let analysisHasDraw = false;
 
   const isPreflop = view.street === 'preflop' || view.board.length < 3;
   if (isPreflop) {
@@ -846,6 +1020,7 @@ export async function decide(
     const analysis = analyzePostflop(view.self.holeCards, view.board);
     handCategory = analysis.categoryName;
     variationReference = analysis.strength;
+    analysisHasDraw = analysis.draw.hasDraw;
 
     let result: PostflopResult;
     if (difficulty === 'beginner') {
@@ -889,13 +1064,32 @@ export async function decide(
     }
   }
 
+  // 真人化失误层：低概率的人类式偏差（入门 > 普通 > 困难 > 专家）；训练 / 对照评估时关闭。
+  if (!isPreflop && !options.profileOverride) {
+    const mistake = maybeHumanMistake(ctx, action, variationReference, analysisHasDraw);
+    if (mistake) {
+      action = mistake.action;
+      reasoning = reasoning + mistake.note;
+    }
+  }
+
+  const moodText = options.profileOverride ? null : moodLabel(mood);
+  if (moodText) reasoning = reasoning + '（手感：' + moodText + '）';
+
   const safeAction = finalizeAction(action, legal);
   const styleName = options.profileOverride ? null : styleLabel(styleId);
+  const tags: string[] = [];
+  if (styleName) tags.push(styleName + '型');
+  const moodTag = options.profileOverride ? null : moodLabel(mood);
+  if (moodTag) tags.push(moodTag);
+  if (!options.profileOverride && opponents.count > 0 && difficulty !== 'beginner') {
+    tags.push('读对手');
+  }
   return {
     action: safeAction,
     debug: {
       difficulty,
-      profile: styleName ? `${profile.style} · ${styleName}型` : profile.style,
+      profile: tags.length > 0 ? profile.style + ' · ' + tags.join(' · ') : profile.style,
       equity,
       potOdds,
       handCategory,
