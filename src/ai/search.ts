@@ -9,6 +9,7 @@
 import type { LegalActions, PlayerAction } from '../game/types';
 import type { PlayerView } from '../game/playerView';
 import { estimateFoldProbability, evOfBet } from './humanModel';
+import { continuationValue } from './continuation';
 
 /** 多人谨慎系数：人数越多，诈唬的弃牌收益越要打折。 */
 export function multiwayCaution(opponentCount: number): number {
@@ -61,18 +62,25 @@ export function depthLimitedSearch(input: DepthLimitedSearchInput): SearchCandid
   const pot = Math.max(1, view.pot);
   const callCost = Math.max(0, legal.callAmount);
   const candidates: SearchCandidate[] = [];
+  const futureValue = continuationValue({
+    street: (view.street ?? 'turn') as 'preflop' | 'flop' | 'turn' | 'river',
+    equity,
+    pot,
+    effectiveStack: Math.max(1, view.self?.stack ?? 100),
+    opponentCount,
+  });
   const caution = multiwayCaution(opponentCount);
   const foldBoost = timingWeak ? 1.15 : 1;
   const foldRate = (fraction: number) =>
     Math.min(0.85, estimateFoldProbability(fraction, foldToBetRate, opponentCount) * caution * foldBoost);
 
   if (legal.canCheck) {
-    candidates.push({ action: { type: 'check' }, ev: equity * pot * 0.95, label: '过牌实现胜率' });
+    candidates.push({ action: { type: 'check' }, ev: equity * pot * 0.95 + futureValue, label: '过牌实现胜率' });
   }
   if (legal.canCall) {
     candidates.push({
       action: { type: 'call' },
-      ev: equity * (pot + callCost) - callCost,
+      ev: equity * (pot + callCost) - callCost + futureValue * 0.4,
       label: '跟注',
     });
   }
@@ -88,7 +96,7 @@ export function depthLimitedSearch(input: DepthLimitedSearchInput): SearchCandid
     if (!aggressive) continue;
     const betChips = Math.max(1, Math.round(target) - legal.currentBet);
     const foldProbability = foldRate(fraction);
-    const ev = evOfBet(pot, equity, betChips, foldProbability, opponentCount);
+    const ev = evOfBet(pot, equity, betChips, foldProbability, opponentCount) + futureValue * 0.6;
     candidates.push({ action: aggressive, ev, label: '下注 / 加注 ' + Math.round(fraction * 100) + '% 池' });
   }
 
