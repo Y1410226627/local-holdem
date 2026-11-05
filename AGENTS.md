@@ -13,6 +13,7 @@
 - **神态语句**：全局开关（默认关闭）；开启后模型返回短 `say`，显示在座位气泡、调试面板。
 - **AI 军师**：独立模型配置（中文输出），仅用户点击/发送时调用；用 `buildPlayerView()` 的人类视图构造上下文，不得包含对手底牌。
 - **玩家名称**：人类名、本地算法机器人名、大模型名均可自定义（`TableConfig.humanName` / `localBotNames` / `llmSeats[].name`）。
+- **体验随机 / 风格**：每个机器人座位在 `createTable` 时由 seed 分配 `styleId`（`src/ai/style.ts` 的 6 种风格），AI 决策时叠加在难度 profile 上（偏移有限）；洗牌与决策使用 `xoshiro128**` + 用途派生随机流；本地机器人台词与思考时间抖动也在 `style.ts` / `useAiDriver.ts`。修改相关代码需更新 `style.test.ts` / `randomness.test.ts`，并保持同 seed 可复现。
 - **容错**：思考型模型正文为空（`finish_reason=length`）时用更短提示 + 更大 token 预算重试一次；支持 `reasoning_content` / `thinking`；仍失败则抛可读 LlmError 并回退本地算法。
 - 修改 LLM 相关代码后必须更新/补充 `src/tests/llm*.test.ts`、`advisor.test.ts`、`llmSettings.test.ts`。
 
@@ -55,7 +56,7 @@ node scripts/setup.mjs --check          # 只检查环境（启动器内部使�
 | --- | --- | --- |
 | 安装依赖 | `npm install --no-audit --no-fund` | 生成 `node_modules/`，退出码 0 |
 | 类型检查 | `npx tsc --noEmit` | 无输出、退出码 0 |
-| 测试 | `npm test` | `19 passed` 测试文件、`247 passed` 用例 |
+| 测试 | `npm test` | `21 passed` 测试文件、`266 passed` 用例 |
 | 构建 | `npm run build` | 生成 `dist/`，退出码 0 |
 | 训练冒烟 | `npm run train -- --rounds=1 --seed=agent-smoke` | 约 2–4 秒，退出码 0 |
 
@@ -78,7 +79,8 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 4. **AI 不能作弊**：AI 只能通过 `buildPlayerView()`（`src/game/playerView.ts`）读取自己的底牌与公共信息，禁止把其他玩家底牌传给 AI。
 5. **规则正确性优先**：改动引擎逻辑必须附带或更新 `src/tests/` 中的测试，并保证 `npm test` 全绿；注意边池、short all-in、单挑、大盲 option、未跟注退回、奇数筹码等边界。
 6. **可复现种子**：引擎随机性由 `seed + handNo` 决定（`src/game/cards.ts`）；UI 默认每局随机种子（`src/ui/seed.ts`）。
-7. 不要改动启动脚本的编码/权限约定：`.bat` 为 **UTF-8 无 BOM + CRLF**；`.sh` / `.command` 为 **LF**，且 `.command` / `.sh` 在 git 索引中需要保留可执行位（`chmod +x` / `git update-index --chmod=+x`）。
+7. **体验随机**：风格/随机化只能小幅调整合法动作与参数，不得破坏难度档差异、不得读取隐藏信息；所有新增随机必须走种子派生流。
+8. 不要改动启动脚本的编码/权限约定：`.bat` 为 **UTF-8 无 BOM + CRLF**；`.sh` / `.command` 为 **LF**，且 `.command` / `.sh` 在 git 索引中需要保留可执行位（`chmod +x` / `git update-index --chmod=+x`）。
 
 ## 目录速览
 
@@ -87,7 +89,8 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 | `src/game/` | 纯函数规则引擎（牌堆、牌型、下注、边池、状态机、受限视图、日志） |
 | `src/ai/` | 四档难度、范围模型、蒙特卡洛胜率、大模型机器人、训练参数；`data/` 为训练产物 |
 | `src/ui/` | React 界面（教程、大厅、牌桌、设置栏、调试面板、历史回放） |
-| `src/tests/` | Vitest 测试（19 个文件 / 247 个用例） |
+| `src/tests/` | Vitest 测试（21 个文件 / 266 个用例） |
+| `src/ai/style.ts` | 体验随机：机器人风格原型 / 下注尺度偏好 / 本地台词 / 变化率 |
 | `src/ai/llmClient.ts` | OpenAI 兼容 chat 客户端（内容提取、思考内容、错误翻译） |
 | `src/ai/llmBot.ts` / `advisor.ts` | 大模型玩家（精简英文提示词、短 JSON、重试、神态）/ AI 军师（中文，按需） |
 | `src/ui/LlmSettingsModal.tsx` / `AdvisorPanel.tsx` | AI 玩家/名称/军师设置 / 军师聊天面板 |
@@ -100,7 +103,7 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 ## 验收清单（DoD）
 
 - [ ] `node scripts/setup.mjs --agent` 退出码 0，输出 `SETUP_RESULT=OK`
-- [ ] `npm test`：19 个测试文件、247 个用例全部通过
+- [ ] `npm test`：21 个测试文件、266 个用例全部通过
 - [ ] `npm run build`：生成 `dist/`，无 TypeScript 错误
 - [ ] `npm run dev -- --host 127.0.0.1 --port 5173 --strictPort` 可启动，HTTP 探测 200
 - [ ] 启动脚本冒烟（按平台）：Windows `启动德州扑克.bat --no-open` / macOS-Linux `bash 启动德州扑克.sh --no-open` 能起服务并返回 200

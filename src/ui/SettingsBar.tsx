@@ -124,7 +124,7 @@ export function SettingsBar({
           <span>调试模式</span>
         </label>
 
-        <label className="toggle" title="让大模型玩家在行动时附带一句神态/台词（额外消耗少量 token）">
+        <label className="toggle" title="大模型玩家附带台词、本地机器人偶尔说一句（纯表演，不影响规则）">
           <input
             type="checkbox"
             checked={tableTalk}

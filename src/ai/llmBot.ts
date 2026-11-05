@@ -12,6 +12,7 @@ import { DIFFICULTY_LABELS } from '../game/types';
 import type { PlayerView } from '../game/playerView';
 import { cardsLabel } from '../game/cards';import { fallbackAction, isActionLegal, type AIDecision, type AIDebugInfo } from './aiPlayer';
 import { analyzePostflop, handKey, positionOf } from './rangeModel';
+import { stylePromptHint } from './style';
 import { memoryPromptLines } from './llmMemory';
 import {
   DEFAULT_MAX_TOKENS,
@@ -244,6 +245,8 @@ export function buildLlmPrompt(
     `You are ${name}, a No-Limit Hold'em player at a local table. Play to win; use pot odds, position, bet sizes and opponent actions.`,
   ];
   if (persona) systemLines.push(`Persona: ${persona}`);
+  const archetype = stylePromptHint(view.self.styleId);
+  if (archetype) systemLines.push(`Table archetype: ${archetype}.`);
   systemLines.push(
     `Style: ${DIFFICULTY_STYLES[difficulty]} (${DIFFICULTY_LABELS[difficulty]}).`,
     `You see only public info and your own hole cards; never guess opponents' hole cards.`,

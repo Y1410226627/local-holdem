@@ -1,11 +1,11 @@
 # 自博弈训练报告
 
-- 生成时间：2026-11-05T13:53:06.707Z
+- 生成时间：2026-11-05T15:10:33.944Z
 - 运行模式：默认全量模式
 - 运行参数：seed = `demo-b`，hands = 60，rounds = 10，mutations = 3，exhibition = 120，mcIterations = 120
 - 并行评估：16 个 worker / 16 核（4 档同时进化，基准与候选并行评估）
-- 本次耗时：1.5 秒
-- 训练对局总手数：13920 手（含基准评估、候选评估与最终对照评估）
+- 本次耗时：1.9 秒
+- 训练对局总手数：13680 手（含基准评估、候选评估与最终对照评估）
 - 经验库展示手数：120 手
 - 训练对象：① 规则引擎机器人（四档参数进化）② 大模型机器人（few-shot 经验库 + SFT 数据集）
 
@@ -30,12 +30,12 @@
 
 | 难度 | baseline BB/100 | trained BB/100 | Δ BB/100 | 接受变异数 | 实际改动字段列表 |
 | --- | ---: | ---: | ---: | ---: | --- |
-| 入门（beginner） | 2.38 | 5.13 | +2.75 | 0 | 无字段变化 |
-| 普通（normal） | 480.21 | 1215.65 | +735.44 | 3 | preflop.play 0.640→0.587、preflop.raise 0.810→0.852、preflop.bluffRaiseRate 0.088→0.125、preflop.mixRaiseRate 0.058→0.107、postflop.bluffRate 0.179→0.160 |
-| 困难（hard） | -997.67 | 397.04 | +1394.71 | 0 | 无字段变化 |
-| 专家（expert） | -1169.08 | -853.31 | +315.77 | 0 | 无字段变化 |
+| 入门（beginner） | -5.94 | -10.83 | -4.90 | 0 | 无字段变化 |
+| 普通（normal） | -541.46 | -563.06 | -21.60 | 1 | preflop.raise 0.909→0.864、preflop.bluffRaiseRate 0.174→0.207 |
+| 困难（hard） | -472.77 | -205.38 | +267.40 | 0 | 无字段变化 |
+| 专家（expert） | 1586.15 | 984.54 | -601.60 | 1 | preflop.raise 0.934→0.867、preflop.bluffRaiseRate 0.285→0.254、postflop.valueThreshold 0.574→0.530 |
 
-- 本次训练有 1/4 档参数发生变化，共接受 3 个变异。
+- 本次训练有 2/4 档参数发生变化，共接受 2 个变异。
 - 训练参数已写入 `src/ai/data/learnedProfiles.json`（每档只写入 10 个可变异字段，其余字段继续使用内置基础档位）。
 - 生效方式：在页面设置中打开「使用训练后参数」开关后生效（对应 `setLearnedProfilesEnabled(true)`）；默认关闭时普通对局仍使用内置基础档位。
 
@@ -49,15 +49,15 @@
 
 ### 入门（beginner）
 
-- 接受 0/10 轮（0.0%）；验证集拦截 4 次；未达阈值 6 轮；训练对局 3360 手。
+- 接受 0/10 轮（0.0%）；验证集拦截 0 次；未达阈值 10 轮；训练对局 2880 手。
 - 接受时拟合 Δ：无。
 - 接受轮次：无。
 
 ### 普通（normal）
 
-- 接受 3/10 轮（30.0%）；验证集拦截 2 次；未达阈值 5 轮；训练对局 3480 手。
-- 接受时拟合 Δ：最小 +2.50 / 平均 +175.33 / 最大 +458.58 BB/100。
-- 接受轮次：第 2 轮 #1、第 4 轮 #1、第 10 轮 #2。
+- 接受 1/10 轮（10.0%）；验证集拦截 5 次；未达阈值 4 轮；训练对局 3600 手。
+- 接受时拟合 Δ：最小 +19.67 / 平均 +19.67 / 最大 +19.67 BB/100。
+- 接受轮次：第 3 轮 #3。
 
 ### 困难（hard）
 
@@ -67,40 +67,40 @@
 
 ### 专家（expert）
 
-- 接受 0/10 轮（0.0%）；验证集拦截 6 次；未达阈值 4 轮；训练对局 3600 手。
-- 接受时拟合 Δ：无。
-- 接受轮次：无。
+- 接受 1/10 轮（10.0%）；验证集拦截 6 次；未达阈值 3 轮；训练对局 3720 手。
+- 接受时拟合 Δ：最小 +138.58 / 平均 +138.58 / 最大 +138.58 BB/100。
+- 接受轮次：第 1 轮 #1。
 
 ## 4. 最终关键参数
 
 | 参数 | 入门 | 普通 | 困难 | 专家 |
 | --- | ---: | ---: | ---: | ---: |
-| `preflop.play` | 0.300 | 0.587 | 0.715 | 0.780 |
-| `preflop.raise` | 0.866 | 0.852 | 0.768 | 0.911 |
-| `preflop.threeBet` | 0.967 | 0.975 | 0.928 | 0.946 |
-| `preflop.bluffRaiseRate` | 0.066 | 0.125 | 0.120 | 0.245 |
-| `preflop.mixRaiseRate` | 0.459 | 0.107 | 0.224 | 0.297 |
-| `preflop.trapRate` | 0.227 | 0.128 | 0.190 | 0.198 |
-| `postflop.bluffRate` | 0.010 | 0.160 | 0.256 | 0.214 |
+| `preflop.play` | 0.300 | 0.650 | 0.646 | 0.780 |
+| `preflop.raise` | 0.866 | 0.864 | 0.820 | 0.867 |
+| `preflop.threeBet` | 0.967 | 0.973 | 0.914 | 0.969 |
+| `preflop.bluffRaiseRate` | 0.066 | 0.207 | 0.137 | 0.254 |
+| `preflop.mixRaiseRate` | 0.459 | 0.205 | 0.147 | 0.238 |
+| `preflop.trapRate` | 0.227 | 0.128 | 0.169 | 0.182 |
+| `postflop.bluffRate` | 0.010 | 0.130 | 0.256 | 0.214 |
 | `postflop.semiBluffRate` | 0.000 | 0.239 | 0.435 | 0.623 |
-| `postflop.valueThreshold` | 0.547 | 0.578 | 0.698 | 0.597 |
-| `postflop.callMargin` | 0.000 | 0.114 | 0.120 | 0.120 |
+| `postflop.valueThreshold` | 0.547 | 0.578 | 0.722 | 0.530 |
+| `postflop.callMargin` | 0.000 | 0.114 | 0.092 | 0.101 |
 
 > `mcIterations`、`betSizes`、`raiseSizes`、`errorRate`、`positionAware`、`style`、`label` 不在变异范围内，四档保持基础档位设定。
 
 ## 5. 大模型机器人训练数据
 
-- few-shot 经验条数：154 条（上限 160）
-- SFT 数据集行数：94 行（上限 400）
-- 经验库按街道：preflop 120、flop 23、turn 8、river 3
-- 经验库按动作：fold 86、check 21、call 8、bet 8、raise 26、allin 5
-- SFT 按街道：preflop 60、flop 23、turn 8、river 3
-- SFT 按动作：fold 45、check 21、call 3、bet 8、raise 12、allin 5
+- few-shot 经验条数：160 条（上限 160）
+- SFT 数据集行数：100 行（上限 400）
+- 经验库按街道：preflop 120、flop 25、turn 11、river 4
+- 经验库按动作：fold 88、check 22、call 5、bet 15、raise 27、allin 3
+- SFT 按街道：preflop 60、flop 25、turn 11、river 4
+- SFT 按动作：fold 46、check 22、call 3、bet 15、raise 11、allin 3
 - 文件路径：`src/ai/data/llm-experience.json`（few-shot 经验库）、`training/llm-sft-dataset.jsonl`（SFT 数据集）。
 - 来源：训练后 hard / expert 座位的 exhibition 自博弈；每手最多 1-2 条，只保留合法、未走回退逻辑、动作明确的决策。
 - 体积控制：SFT 最多 400 行，其中翻牌前最多 60 条；few-shot 经验最多 160 条；报告只保留汇总统计，不再逐轮展开。
 - few-shot 经验库：`LlmExperienceFile`（`generatedAt` / `hands` / `examples`）接口保持不变；本地大模型机器人会在提示词中把匹配街道 / 是否面对下注的样本作为 few-shot 参考。
-- SFT 数据集：JSONL，每行一条 `{"messages":[{"role":"system",...},{"role":"user",...},{"role":"assistant",...}]}`；user 消息含街道、位置、底牌、公共牌、底池、当前下注、需跟注、是否面对下注与【合法动作】；assistant 只含 `{"action":...,"amount":...,"reason":...}`。
+- SFT 数据集：JSONL，每行一条 `{"messages":[{"role":"system",...},{"role":"user",...},{"role":"assistant",...}]}`；system/user 为精简英文（HAND/POS/HOLE/BOARD/POT/LEGAL 短格式）；assistant 只含短键 JSON `{"a":...,"x":...,"w":...}`。
 - 用途：应用内大模型机器人会直接使用 `llm-experience.json` 做 few-shot；`llm-sft-dataset.jsonl` 可交给本地微调工具（llama.cpp / LlamaFactory 等）做可选微调，本项目不自动微调。
 
 ## 6. 如何启用训练参数

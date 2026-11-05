@@ -98,6 +98,8 @@ export interface PlayerState {
   kind?: PlayerKind;
   /** 大模型机器人槽位（kind === 'llm' 时有效）。 */
   llmSlot?: number;
+  /** 机器人风格原型 id（0..BOT_STYLE_COUNT-1；体验随机层使用，人类为 undefined）。 */
+  styleId?: number;
   /** 身后剩余筹码。 */
   stack: number;
   /** 底牌。任意时刻都应通过 PlayerView 过滤后再交给 AI。 */
@@ -266,6 +268,8 @@ export interface TablePlayer {
   kind: PlayerKind;
   /** 大模型机器人槽位。 */
   llmSlot?: number;
+  /** 机器人风格原型 id。 */
+  styleId?: number;
 }
 
 export interface HandHistoryPlayer {
@@ -277,6 +281,7 @@ export interface HandHistoryPlayer {
   status: PlayerStatus;
   kind?: PlayerKind;
   llmSlot?: number;
+  styleId?: number;
 }
 
 export interface HandHistory {

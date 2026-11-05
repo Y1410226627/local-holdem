@@ -10,13 +10,19 @@
  * - expert：蒙特卡洛（默认 20000 次）+ 基于行动历史的范围收窄 + SPR / 多街计划。
  *
  * 确定性：随机源固定为
- *   mulberry32(hashString(`${view.seed}#${difficulty}#${view.actions.length}`))
+ *   derivedRng(view.seed, difficulty, actions.length, styleId)
  * 绝不使用 Math.random。
  */
 import type { Difficulty, LegalActions, PlayerAction } from '../game/types';
 import type { PlayerView } from '../game/playerView';
-import { hashString, mulberry32 } from '../game/cards';
+import { derivedRng } from '../game/cards';
 import { DIFFICULTY_PROFILES, getDifficultyProfile, type DifficultyProfile } from './difficulty';
+import {
+  applyStyleVariant,
+  sampleSizeIndex,
+  styleLabel,
+  variationRateFor,
+} from './style';
 import { estimateEquity, type RangeWeight } from './equity';
 import {
   analyzePostflop,
@@ -75,6 +81,8 @@ interface DecisionContext {
   profile: DifficultyProfile;
   rng: () => number;
   potOdds: number;
+  /** 风格原型 id（体验随机层；undefined 时不施加风格）。 */
+  styleId?: number;
 }
 
 interface OpponentRead {
@@ -169,10 +177,9 @@ function targetFromFraction(view: PlayerView, legal: LegalActions, fraction: num
   return Math.round(base);
 }
 
-function pickSize(rng: () => number, sizes: readonly number[]): number {
+function pickSize(rng: () => number, sizes: readonly number[], styleId?: number): number {
   if (sizes.length === 0) return 0.5;
-  const index = Math.min(sizes.length - 1, Math.floor(rng() * sizes.length));
-  return sizes[index];
+  return sizes[sampleSizeIndex(rng, sizes, styleId)] ?? sizes[0];
 }
 
 function countOpponents(view: PlayerView): number {
@@ -486,7 +493,7 @@ function decideHardPostflop(
   if (legal.canCheck) {
     const bet = buildAggressive(
       legal,
-      targetFromFraction(view, legal, pickSize(rng, betSizes)),
+      targetFromFraction(view, legal, pickSize(rng, betSizes, ctx.styleId)),
     );
     if (equity >= 0.74 && bet) {
       action = bet;
@@ -507,7 +514,7 @@ function decideHardPostflop(
   } else {
     const raise = buildAggressive(
       legal,
-      targetFromFraction(view, legal, pickSize(rng, profile.postflop.raiseSizes)),
+      targetFromFraction(view, legal, pickSize(rng, profile.postflop.raiseSizes, ctx.styleId)),
     );
     if (equity >= 0.78 && raise && rng() < 0.58) {
       action = raise;
@@ -538,14 +545,19 @@ function decideHardPostflop(
   return { action, reasoning };
 }
 
-function pickExpertSize(view: PlayerView, rng: () => number, strong: boolean): number {
+function pickExpertSize(
+  view: PlayerView,
+  rng: () => number,
+  strong: boolean,
+  styleId?: number,
+): number {
   const sizes = DIFFICULTY_PROFILES.expert.postflop.betSizes;
   if (view.street === 'river' && strong && rng() < 0.3) {
     return sizes[sizes.length - 1];
   }
   const limit = view.street === 'river' ? sizes.length : Math.max(1, sizes.length - 1);
-  const index = Math.min(limit - 1, Math.floor(rng() * limit));
-  return sizes[Math.max(0, index)];
+  const subset = sizes.slice(0, limit);
+  return subset[sampleSizeIndex(rng, subset, styleId)] ?? sizes[0];
 }
 
 function multiStreetPlan(
@@ -591,7 +603,7 @@ function decideExpertPostflop(
   let note: string;
 
   if (legal.canCheck) {
-    const size = pickExpertSize(view, rng, equity >= 0.7);
+    const size = pickExpertSize(view, rng, equity >= 0.7, ctx.styleId);
     const bet = buildAggressive(legal, targetFromFraction(view, legal, size));
     if (equity >= 0.78) {
       if (spr <= 2.5 && legal.canAllIn && legal.maxRaiseTo > legal.currentBet) {
@@ -624,7 +636,7 @@ function decideExpertPostflop(
   } else {
     const raise = buildAggressive(
       legal,
-      targetFromFraction(view, legal, pickExpertSize(view, rng, equity >= 0.7)),
+      targetFromFraction(view, legal, pickExpertSize(view, rng, equity >= 0.7, ctx.styleId)),
     );
     if (
       (equity >= 0.82 || (spr <= 2 && equity >= 0.6)) &&
@@ -712,6 +724,63 @@ function buildOpponentReads(view: PlayerView): OpponentRead[] {
   return reads;
 }
 
+/**
+ * 体验随机：在基础决策之上做小幅、合法的随机化。
+ * 只在风格概率触发时生效，且所有动作仍经过合法性检查；不会替代基础胜率 / 赔率逻辑。
+ */
+function maybeStyleVariation(
+  ctx: DecisionContext,
+  action: PlayerAction,
+  reference: number | undefined,
+): { action: PlayerAction; note: string } | null {
+  const { view, legal, profile, rng, difficulty, styleId } = ctx;
+  const rate = variationRateFor(styleId, difficulty);
+  if (rate <= 0 || rng() >= rate) return null;
+  if (view.board.length < 3) return null;
+
+  // 1) 进攻动作随机换一个合法尺度（真人也会偶尔调整下注大小）。
+  if ((action.type === 'bet' || action.type === 'raise') && legal.aggressiveType) {
+    const fractions =
+      action.type === 'bet' ? profile.postflop.betSizes : profile.postflop.raiseSizes;
+    const baseFraction = fractions[0] ?? 0.5;
+    const candidateFractions =
+      fractions.length > 1
+        ? fractions
+        : [baseFraction * (rng() < 0.5 ? 0.6 : 1.6)];
+    const fraction = candidateFractions[sampleSizeIndex(rng, candidateFractions, styleId)] ??
+      candidateFractions[0];
+    const alt = buildAggressive(legal, targetFromFraction(view, legal, fraction));
+    if (alt && JSON.stringify(alt) !== JSON.stringify(action)) {
+      return { action: alt, note: '（风格随机化：调整了下注尺度）' };
+    }
+  }
+
+  if (reference === undefined) return null;
+  const required = ctx.potOdds + profile.postflop.callMargin;
+
+  // 2) 牌力接近临界值时，在跟注 / 弃牌之间随机化（避免永远同一选择）。
+  if (Math.abs(reference - required) <= 0.03) {
+    if (action.type === 'call' && legal.canFold && rng() < 0.5) {
+      return { action: { type: 'fold' }, note: '（边缘牌随机弃牌）' };
+    }
+    if (action.type === 'fold' && legal.canCall && rng() < 0.5) {
+      return { action: { type: 'call' }, note: '（边缘牌随机跟注）' };
+    }
+  }
+
+  // 3) 强牌偶尔慢玩（过牌），弱牌偶尔抢下底池（小额下注）。
+  if (reference >= 0.72 && action.type !== 'check' && legal.canCheck && rng() < 0.3) {
+    return { action: { type: 'check' }, note: '（强牌随机慢玩）' };
+  }
+  if (reference <= 0.26 && action.type === 'check' && legal.canBet) {
+    const fractions = profile.postflop.betSizes;
+    const fraction = fractions[sampleSizeIndex(rng, fractions, styleId)] ?? fractions[0] ?? 0.5;
+    const alt = buildAggressive(legal, targetFromFraction(view, legal, fraction));
+    if (alt) return { action: alt, note: '（弱牌随机诈唬）' };
+  }
+  return null;
+}
+
 /* ------------------------------------------------------------------ */
 /* 主入口                                                              */
 /* ------------------------------------------------------------------ */
@@ -740,8 +809,13 @@ export async function decide(
   const legal = view.legal;
   if (!legal) throw new Error('当前不是该玩家的行动回合');
 
-  const profile = options.profileOverride ?? getDifficultyProfile(difficulty);
-  const rng = mulberry32(hashString(`${view.seed}#${difficulty}#${view.actions.length}`));
+  const baseProfile = options.profileOverride ?? getDifficultyProfile(difficulty);
+  const styleId = view.self.styleId;
+  // profileOverride 用于训练 / 对照评估：保持参数原样，不叠加风格随机层。
+  const profile = options.profileOverride
+    ? baseProfile
+    : applyStyleVariant(baseProfile, styleId);
+  const rng = derivedRng(view.seed, difficulty, view.actions.length, styleId ?? 0);
   const potOdds = potOddsOf(view, legal);
   const ctx: DecisionContext = {
     view,
@@ -750,6 +824,7 @@ export async function decide(
     profile,
     rng,
     potOdds,
+    styleId: options.profileOverride ? undefined : styleId,
   };
 
   let action: PlayerAction;
@@ -757,6 +832,7 @@ export async function decide(
   let handCategory: string;
   let equity: number | undefined;
   let iterations: number | undefined;
+  let variationReference: number | undefined;
 
   const isPreflop = view.street === 'preflop' || view.board.length < 3;
   if (isPreflop) {
@@ -769,6 +845,7 @@ export async function decide(
   } else {
     const analysis = analyzePostflop(view.self.holeCards, view.board);
     handCategory = analysis.categoryName;
+    variationReference = analysis.strength;
 
     let result: PostflopResult;
     if (difficulty === 'beginner') {
@@ -791,6 +868,7 @@ export async function decide(
       const equityResult = await estimateEquity(view, rounds, rng, equityOptions);
       equity = equityResult.equity;
       iterations = equityResult.iterations;
+      variationReference = equity;
       if (difficulty === 'hard') {
         result = decideHardPostflop(ctx, analysis, equity, iterations);
       } else {
@@ -802,12 +880,22 @@ export async function decide(
     reasoning = result.reasoning;
   }
 
+  // 体验随机：风格触发的合法小幅变化（尺度 / 慢玩 / 边缘牌随机化）。
+  if (!isPreflop) {
+    const varied = maybeStyleVariation(ctx, action, variationReference);
+    if (varied) {
+      action = varied.action;
+      reasoning = `${reasoning}${varied.note}`;
+    }
+  }
+
   const safeAction = finalizeAction(action, legal);
+  const styleName = options.profileOverride ? null : styleLabel(styleId);
   return {
     action: safeAction,
     debug: {
       difficulty,
-      profile: profile.style,
+      profile: styleName ? `${profile.style} · ${styleName}型` : profile.style,
       equity,
       potOdds,
       handCategory,

@@ -11,6 +11,7 @@ import type {
   TableState,
 } from './types';
 import { DEFAULT_CONFIG, MAX_LLM_SEATS, MAX_PLAYERS, MIN_PLAYERS } from './types';
+import { assignBotStyleIds } from './cards';
 import { IllegalActionError, createHand, getLegalActions, playAction } from './gameEngine';
 
 export const BOT_NAMES = ['阿豪', '小雅', '老陈', '莉莉', '大鹏'];
@@ -117,6 +118,15 @@ export function createTable(overrides: Partial<TableConfig> = {}): TableState {
     });
   }
 
+  // 给所有机器人分配「风格原型」：每个新局由 seed 打乱，体验随机但可复现。
+  const styleIds = assignBotStyleIds(
+    config.seed,
+    players.filter((player) => !player.isHuman).map((player) => player.id),
+  );
+  for (const player of players) {
+    if (!player.isHuman) player.styleId = styleIds.get(player.id);
+  }
+
   return {
     config,
     players,
@@ -174,6 +184,7 @@ function finalizeHand(table: TableState): void {
       status: player.status,
       kind: player.kind,
       llmSlot: player.llmSlot,
+      styleId: player.styleId,
     })),
     result: hand.result,
     actions: hand.actions.slice(),
@@ -230,6 +241,7 @@ export function startNextHand(table: TableState): TableState {
       difficulty: player.difficulty,
       kind: player.kind,
       llmSlot: player.llmSlot,
+      styleId: player.styleId,
     })),
     buttonIndex,
     smallBlind: next.config.smallBlind,
@@ -312,7 +324,18 @@ export function resetChips(table: TableState, options: ResetChipsOptions = {}): 
     stack: config.startingStack,
     kind: player.kind,
     llmSlot: player.llmSlot,
+    styleId: player.styleId,
   }));
+  // 注入新种子 = 新牌局：重新打乱风格分配，让每个新局的对手“性格组合”不同。
+  if (injectedSeed) {
+    const styleIds = assignBotStyleIds(
+      config.seed,
+      next.players.filter((player) => !player.isHuman).map((player) => player.id),
+    );
+    for (const player of next.players) {
+      if (!player.isHuman) player.styleId = styleIds.get(player.id);
+    }
+  }
   next.buttonIndex = config.playerCount - 1;
   next.handNo = 0;
   next.hand = null;

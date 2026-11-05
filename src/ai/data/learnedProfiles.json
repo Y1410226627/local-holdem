@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-11-05T13:53:06.707Z",
-  "hands": 13920,
+  "generatedAt": "2026-11-05T15:10:33.944Z",
+  "hands": 13680,
   "seed": "demo-b",
   "profiles": {
     "beginner": {
@@ -21,15 +21,15 @@
     },
     "normal": {
       "preflop": {
-        "play": 0.587,
-        "raise": 0.852,
-        "threeBet": 0.975,
-        "bluffRaiseRate": 0.125,
-        "mixRaiseRate": 0.107,
+        "play": 0.65,
+        "raise": 0.864,
+        "threeBet": 0.973,
+        "bluffRaiseRate": 0.207,
+        "mixRaiseRate": 0.205,
         "trapRate": 0.128
       },
       "postflop": {
-        "bluffRate": 0.16,
+        "bluffRate": 0.13,
         "semiBluffRate": 0.239,
         "valueThreshold": 0.578,
         "callMargin": 0.114
@@ -37,65 +37,65 @@
     },
     "hard": {
       "preflop": {
-        "play": 0.715,
-        "raise": 0.768,
-        "threeBet": 0.928,
-        "bluffRaiseRate": 0.12,
-        "mixRaiseRate": 0.224,
-        "trapRate": 0.19
+        "play": 0.646,
+        "raise": 0.82,
+        "threeBet": 0.914,
+        "bluffRaiseRate": 0.137,
+        "mixRaiseRate": 0.147,
+        "trapRate": 0.169
       },
       "postflop": {
         "bluffRate": 0.256,
         "semiBluffRate": 0.435,
-        "valueThreshold": 0.698,
-        "callMargin": 0.12
+        "valueThreshold": 0.722,
+        "callMargin": 0.092
       }
     },
     "expert": {
       "preflop": {
         "play": 0.78,
-        "raise": 0.911,
-        "threeBet": 0.946,
-        "bluffRaiseRate": 0.245,
-        "mixRaiseRate": 0.297,
-        "trapRate": 0.198
+        "raise": 0.867,
+        "threeBet": 0.969,
+        "bluffRaiseRate": 0.254,
+        "mixRaiseRate": 0.238,
+        "trapRate": 0.182
       },
       "postflop": {
         "bluffRate": 0.214,
         "semiBluffRate": 0.623,
-        "valueThreshold": 0.597,
-        "callMargin": 0.12
+        "valueThreshold": 0.53,
+        "callMargin": 0.101
       }
     }
   },
   "metrics": {
     "beginner": {
-      "baselineBB100": 2.375,
-      "trainedBB100": 5.125,
+      "baselineBB100": -5.937,
+      "trainedBB100": -10.833,
       "acceptedMutations": 0,
       "rounds": 10,
-      "hands": 3360
+      "hands": 2880
     },
     "normal": {
-      "baselineBB100": 480.208,
-      "trainedBB100": 1215.646,
-      "acceptedMutations": 3,
+      "baselineBB100": -541.458,
+      "trainedBB100": -563.062,
+      "acceptedMutations": 1,
       "rounds": 10,
-      "hands": 3480
+      "hands": 3600
     },
     "hard": {
-      "baselineBB100": -997.667,
-      "trainedBB100": 397.042,
+      "baselineBB100": -472.771,
+      "trainedBB100": -205.375,
       "acceptedMutations": 0,
       "rounds": 10,
       "hands": 3480
     },
     "expert": {
-      "baselineBB100": -1169.083,
-      "trainedBB100": -853.312,
-      "acceptedMutations": 0,
+      "baselineBB100": 1586.146,
+      "trainedBB100": 984.542,
+      "acceptedMutations": 1,
       "rounds": 10,
-      "hands": 3600
+      "hands": 3720
     }
   }
 }

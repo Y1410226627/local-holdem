@@ -45,6 +45,7 @@ export interface CreateHandPlayerInput {
   difficulty?: Difficulty;
   kind?: PlayerKind;
   llmSlot?: number;
+  styleId?: number;
 }
 
 export interface CreateHandOptions {
@@ -448,6 +449,7 @@ export function createHand(options: CreateHandOptions): HandState {
     difficulty: input.difficulty,
     kind: input.kind,
     llmSlot: input.llmSlot,
+    styleId: input.styleId,
     stack: input.stack,
     holeCards: [],
     committedThisStreet: 0,

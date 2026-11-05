@@ -31,6 +31,8 @@ export interface PublicPlayerView {
   kind?: PlayerKind;
   /** 大模型机器人槽位。 */
   llmSlot?: number;
+  /** 机器人风格原型 id（0..5）；人类无。 */
+  styleId?: number;
   stack: number;
   committedThisStreet: number;
   totalCommitted: number;
@@ -85,6 +87,7 @@ export function buildPlayerView(hand: HandState, viewerId: number, seed: string)
     difficulty: player.difficulty,
     kind: player.kind,
     llmSlot: player.llmSlot,
+    styleId: player.styleId,
     stack: player.stack,
     committedThisStreet: player.committedThisStreet,
     totalCommitted: player.totalCommitted,

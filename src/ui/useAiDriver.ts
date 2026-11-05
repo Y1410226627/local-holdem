@@ -16,8 +16,10 @@ import type { LlmSeatConfig, PlayerAction, TableState } from '../game/types';
 import { act } from '../game/stateMachine';
 import { getLegalActions } from '../game/gameEngine';
 import { buildPlayerView } from '../game/playerView';
+import { derivedRng } from '../game/cards';
 import { decide, type AIDecision } from '../ai/aiPlayer';
 import { decideWithLlm } from '../ai/llmBot';
+import { pickLocalTalk, shouldLocalTalk } from '../ai/style';
 import { findEnabledLlmSlot, toLlmSeatConfig, type LlmSettings } from './llmSettings';
 import type { AiDebugRecord, AiSpeed } from './types';
 import { SPEED_DELAYS } from './types';
@@ -162,6 +164,14 @@ export function useAiDriver({
           decision = await decide(view, aiDifficulty, isLlm ? { maxIterations: 400 } : {});
         }
 
+        // 体验随机：本地算法玩家在开启「神态语句」时也会偶尔说一句（纯表演，不影响决策）。
+        if (!isLlm && llmSettingsRef.current.tableTalk && decision.debug.source !== 'llm') {
+          const seedParts = [view.seed, currentHand.actions.length, actor.id] as const;
+          if (shouldLocalTalk(view.self.styleId, ...seedParts)) {
+            talk = pickLocalTalk(view.self.styleId, ...seedParts);
+          }
+        }
+
         if (!isCurrent() || readActingKey() !== key) return;
         const alreadyApplied = appliedRef.current;
         if (alreadyApplied && alreadyApplied.epoch === epoch && alreadyApplied.key === key) return;
@@ -211,9 +221,15 @@ export function useAiDriver({
       }
     };
 
+    // 体验随机：思考时间抖动 + 大底池“想久一点”，让节奏更像真人（不影响决策公平性）。
+    const delayRng = derivedRng('bot-delay', table.config.seed, hand.handNo, actor.id, hand.actionCount);
+    const jitter = 0.7 + delayRng() * 0.9;
+    const potPressure = hand.pot > Math.max(1, actor.stack) * 1.5 ? 0.35 : 0;
+    const delay = Math.max(150, Math.round(SPEED_DELAYS[speed] * (jitter + potPressure)));
+
     const timer = window.setTimeout(() => {
       void run();
-    }, SPEED_DELAYS[speed]);
+    }, delay);
 
     return () => {
       cancelled = true;

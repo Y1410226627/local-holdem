@@ -1870,7 +1870,7 @@ export function renderReport(input: ReportInput): string {
   lines.push('- 来源：训练后 hard / expert 座位的 exhibition 自博弈；每手最多 1-2 条，只保留合法、未走回退逻辑、动作明确的决策。');
   lines.push(`- 体积控制：SFT 最多 ${MAX_SFT_EXAMPLES} 行，其中翻牌前最多 ${MAX_SFT_PREFLOP_EXAMPLES} 条；few-shot 经验最多 ${MAX_EXPERIENCE_EXAMPLES} 条；报告只保留汇总统计，不再逐轮展开。`);
   lines.push('- few-shot 经验库：`LlmExperienceFile`（`generatedAt` / `hands` / `examples`）接口保持不变；本地大模型机器人会在提示词中把匹配街道 / 是否面对下注的样本作为 few-shot 参考。');
-  lines.push('- SFT 数据集：JSONL，每行一条 `{"messages":[{"role":"system",...},{"role":"user",...},{"role":"assistant",...}]}`；user 消息含街道、位置、底牌、公共牌、底池、当前下注、需跟注、是否面对下注与【合法动作】；assistant 只含 `{"action":...,"amount":...,"reason":...}`。');
+  lines.push('- SFT 数据集：JSONL，每行一条 `{"messages":[{"role":"system",...},{"role":"user",...},{"role":"assistant",...}]}`；system/user 为精简英文（HAND/POS/HOLE/BOARD/POT/LEGAL 短格式）；assistant 只含短键 JSON `{"a":...,"x":...,"w":...}`。');
   lines.push('- 用途：应用内大模型机器人会直接使用 `llm-experience.json` 做 few-shot；`llm-sft-dataset.jsonl` 可交给本地微调工具（llama.cpp / LlamaFactory 等）做可选微调，本项目不自动微调。');
   lines.push('');
 

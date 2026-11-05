@@ -2,7 +2,7 @@
  * 牌、牌堆、洗牌与可复现随机数。
  *
  * - 52 张牌，无大小王，花色不分大小。
- * - Fisher-Yates 洗牌；洗牌随机源为种子派生的 mulberry32 PRNG。
+ * - Fisher-Yates 洗牌；洗牌随机源为种子派生的 xoshiro128** PRNG（128 位状态）。
  * - 同一 seed + 手数 → 完全相同的牌堆（P1 可复现种子）。
  */
 import type { Card, Rank, Suit } from './types';
@@ -63,7 +63,7 @@ export function hashString(input: string): number {
   return hash >>> 0;
 }
 
-/** mulberry32：小巧、快速的确定性 32 位 PRNG，返回 [0, 1)。 */
+/** mulberry32：小巧、快速的确定性 32 位 PRNG，返回 [0, 1)。保留供测试/兼容使用。 */
 export function mulberry32(seed: number): () => number {
   let a = seed >>> 0;
   return function next(): number {
@@ -75,8 +75,75 @@ export function mulberry32(seed: number): () => number {
   };
 }
 
+/** splitmix32：把 32 位种子扩展成高质量状态序列（用于给 xoshiro 播种）。 */
+function splitmix32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x9e3779b9) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 16), 0x21f0aaad);
+    t = Math.imul(t ^ (t >>> 15), 0x735a2d97);
+    return (t ^ (t >>> 15)) >>> 0;
+  };
+}
+
+const rotl32 = (value: number, shift: number): number =>
+  ((value << shift) | (value >>> (32 - shift))) >>> 0;
+
+/**
+ * xoshiro128**：128 位状态、周期 2^128-1 的快速 PRNG（返回 [0, 1)）。
+ *
+ * 相比 mulberry32（32 位状态、周期 2^32）：
+ * - 更长的状态与周期，跨手 / 跨决策的相关性更低；
+ * - 通过 splitmix32 从任意 32 位种子播种，保持“同种子完全可复现”。
+ */
+export function xoshiro128ss(seed: number): () => number {
+  const seeder = splitmix32(seed);
+  let s0 = seeder();
+  let s1 = seeder();
+  let s2 = seeder();
+  let s3 = seeder();
+  if ((s0 | s1 | s2 | s3) === 0) s0 = 1;
+  return function next(): number {
+    const result = Math.imul(rotl32(Math.imul(s1, 5) >>> 0, 7) >>> 0, 9) >>> 0;
+    const t = (s1 << 9) >>> 0;
+    s2 = (s2 ^ s0) >>> 0;
+    s3 = (s3 ^ s1) >>> 0;
+    s1 = (s1 ^ s2) >>> 0;
+    s0 = (s0 ^ s3) >>> 0;
+    s2 = (s2 ^ t) >>> 0;
+    s3 = rotl32(s3, 11);
+    return result / 4294967296;
+  };
+}
+
+/** 由字符串/数字种子派生的确定性 PRNG（默认 xoshiro128**）。 */
 export function seededRng(seed: string | number): () => number {
-  return mulberry32(typeof seed === 'string' ? hashString(seed) : seed >>> 0);
+  return xoshiro128ss(typeof seed === 'string' ? hashString(seed) : seed >>> 0);
+}
+
+/** 由多段字符串/数字派生独立随机流，避免不同用途共用同一序列。 */
+export function derivedRng(...parts: ReadonlyArray<string | number>): () => number {
+  return xoshiro128ss(hashString(parts.map(String).join('#')));
+}
+
+/** 风格原型数量（与 src/ai/style.ts 的 BOT_STYLES 保持一致）。 */
+export const BOT_STYLE_COUNT = 6;
+
+/**
+ * 给一桌非人类玩家分配风格下标：每个新局由牌桌 seed 打乱顺序分配，
+ * 保证同桌尽量不重复、不同新局组合不同（体验随机），且完全可复现。
+ */
+export function assignBotStyleIds(seed: string, playerIds: readonly number[]): Map<number, number> {
+  const order = shuffle(
+    Array.from({ length: BOT_STYLE_COUNT }, (_item, index) => index),
+    derivedRng(seed, 'table-styles'),
+  );
+  const result = new Map<number, number>();
+  playerIds.forEach((playerId, index) => {
+    result.set(playerId, order[index % order.length] ?? 0);
+  });
+  return result;
 }
 
 /** Fisher-Yates 洗牌，返回新数组，不修改输入。 */
@@ -93,8 +160,7 @@ export function shuffle<T>(items: readonly T[], rng: () => number): T[] {
 
 /** 第 handNo 手牌的洗好牌堆：由 seed + 手数确定，可复现。 */
 export function buildShuffledDeck(seed: string, handNo: number): Card[] {
-  const rng = mulberry32(hashString(`${seed}#hand-${handNo}`));
-  return shuffle(createDeck(), rng);
+  return shuffle(createDeck(), seededRng(`${seed}#hand-${handNo}`));
 }
 
 /** 牌的稳定数字 id（0-51）：(rank-2)*4 + suitIndex。 */
