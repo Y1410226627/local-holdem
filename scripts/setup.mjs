@@ -214,7 +214,7 @@ function main() {
   if (!INSTALL_ONLY) {
     if (!SKIP_TESTS) {
       print('');
-      print('[ 3/4 ] 运行全部测试（共 24 个测试文件 / 325 个用例）...');
+      print('[ 3/4 ] 运行全部测试（共 25 个测试文件 / 340 个用例）...');
       const testSeconds = runNpm('test', '测试');
       print(`[ 测试 ] OK（${testSeconds}s）`);
     }

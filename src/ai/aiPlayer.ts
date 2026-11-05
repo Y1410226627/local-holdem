@@ -22,6 +22,7 @@ import {
   getDifficultyProfile,
   type DifficultyProfile,
 } from './difficulty';
+import { gtoBoundaryAdjust, gtoClosenessFor, gtoEvSizeChoice, gtoPushFoldAdvice } from './gto';
 import {
   applyChallengeVariant,
   buildChallengeRanges,
@@ -129,6 +130,8 @@ interface DecisionContext {
   opponents: OpponentSummary;
   /** 挑战模式（宗师 AI）。 */
   challenge: boolean;
+  /** GTO / 均衡接近度 0..1（难度越高越接近均衡策略）。 */
+  closeness: number;
   /** 挑战模式的宗师原型 id。 */
   archetypeId?: number;
   /** 当前手读到的对手思考时间（挑战模式）。 */
@@ -339,6 +342,34 @@ function decidePreflop(
   const { view, legal, difficulty, profile, rng } = ctx;
   const facingRaise = view.currentBet > view.bigBlind;
   const position = positionOf(view);
+
+  // GTO 短码单挑：用抽象 CFR 的 push/fold 均衡解指导全下 / 跟注（接近度越高越常用）。
+  if (ctx.closeness >= 0.1) {
+    const advice = gtoPushFoldAdvice(view);
+    if (advice && rng() < ctx.closeness) {
+      const takeChart = rng() < advice.frequency;
+      if (takeChart) {
+        if (advice.action === 'push' && legal.canAllIn) {
+          return {
+            action: { type: 'allin' },
+            reasoning: `${advice.note}；按均衡频率选择全下。`,
+          };
+        }
+        if (advice.action === 'call' && legal.canCall) {
+          return {
+            action: { type: 'call' },
+            reasoning: `${advice.note}；按均衡频率选择跟注。`,
+          };
+        }
+        if (advice.action === 'fold' && legal.canFold) {
+          return {
+            action: { type: 'fold' },
+            reasoning: `${advice.note}；按均衡频率选择弃牌。`,
+          };
+        }
+      }
+    }
+  }
   const positionText = POSITION_LABELS[position];
   // 真人化：面对 3-bet / 多人加注时收紧范围；晚位对多人溜入便宜看牌时小幅放宽。
   const baseThresholds = preflopThresholdsForProfile(profile, position);
@@ -859,9 +890,13 @@ function decideChallengePostflop(
   const trapSlowplay =
     strong && rng() < profile.preflop.trapRate * archetype.trap * (view.street === 'flop' ? 0.8 : 0.45);
 
-  const sizeChoice = (raise: boolean, isBluff: boolean) =>
-    chooseChallengeSize({
-      fractions: raise ? post.raiseSizes : post.betSizes,
+  const sizeChoice = (raise: boolean, isBluff: boolean) => {
+    const baseFractions = raise ? post.raiseSizes : post.betSizes;
+    const scaledFractions = baseFractions.map((fraction) =>
+      Math.max(0.15, Math.min(2, fraction * archetype.sizing)),
+    );
+    const base = chooseChallengeSize({
+      fractions: baseFractions,
       pot: view.pot,
       equity,
       currentBet: legal.currentBet,
@@ -873,6 +908,23 @@ function decideChallengePostflop(
       archetypeId: ctx.archetypeId,
       isBluff,
     });
+    const gto = gtoEvSizeChoice({
+      fractions: scaledFractions,
+      pot: view.pot,
+      equity,
+      currentBet: legal.currentBet,
+      callAmount: legal.callAmount,
+      legal,
+      foldToBetRate: opponents.avgFoldToBet,
+      opponentCount,
+      closeness: ctx.closeness,
+      rng,
+    });
+    if (rng() < ctx.closeness) {
+      return { fraction: gto.fraction, ev: base.ev, note: gto.note || base.note };
+    }
+    return base;
+  };
 
   let action: PlayerAction;
   let note: string;
@@ -1232,6 +1284,7 @@ export async function decide(
     styleId ?? 0,
     challenge ? 1 : 0,
   );
+  const closeness = options.profileOverride ? 0 : gtoClosenessFor(difficulty, challenge);
   const potOdds = potOddsOf(view, legal);
   const archetypeId = challenge ? view.self.challengeArchetypeId : undefined;
   const timingTells = challenge ? readTimingTells(view) : [];
@@ -1246,6 +1299,7 @@ export async function decide(
     mood,
     opponents,
     challenge,
+    closeness,
     archetypeId,
     timingTells,
     bettingTells,
@@ -1323,6 +1377,38 @@ export async function decide(
     reasoning = result.reasoning;
   }
 
+  // GTO 近似层：在底池赔率临界做均衡混合，并补足一定比例的平衡诈唬。
+  if (!isPreflop && !options.profileOverride && ctx.closeness >= 0.2) {
+    const adjusted = gtoBoundaryAdjust({
+      action,
+      equity: variationReference ?? 0.5,
+      potOdds,
+      legal,
+      closeness: ctx.closeness,
+      rng,
+    });
+    if (adjusted) {
+      action = adjusted.action;
+      reasoning = reasoning + adjusted.note;
+    }
+    if (
+      action.type === 'check' &&
+      legal.canBet &&
+      (variationReference ?? 1) < 0.32 &&
+      rng() < ctx.closeness * 0.12
+    ) {
+      const fraction = ctx.profile.postflop.betSizes[0] ?? 0.5;
+      const bluffBet = buildAggressive(
+        legal,
+        targetFromFraction(view, legal, Math.max(0.15, Math.min(1, fraction))),
+      );
+      if (bluffBet) {
+        action = bluffBet;
+        reasoning = reasoning + '（GTO 平衡诈唬候选：按均衡比例补足诈唬组合）';
+      }
+    }
+  }
+
   // 体验随机：风格触发的合法小幅变化（尺度 / 慢玩 / 边缘牌随机化）；挑战模式用自身随机化。
   if (!isPreflop && !challenge) {
     const varied = maybeStyleVariation(ctx, action, variationReference);
@@ -1349,6 +1435,9 @@ export async function decide(
   const tags: string[] = [];
   if (styleName) tags.push(styleName + '型');
   if (challenge) tags.push(challengeArchetypeLabel(archetypeId));
+  if (!options.profileOverride && closeness >= 0.5) {
+    tags.push('GTO ' + Math.round(closeness * 100) + '%');
+  }
   const moodTag = options.profileOverride ? null : moodLabel(mood);
   if (moodTag) tags.push(moodTag);
   if (!options.profileOverride && opponents.count > 0 && difficulty !== 'beginner') {
