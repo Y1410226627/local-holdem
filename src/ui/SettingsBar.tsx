@@ -54,11 +54,18 @@ export function SettingsBar({
     <section className="settings-bar" aria-label="牌局设置">
       <div className="settings-bar__fields">
         <label className="field">
-          <span className="field__label">{settings.challengeMode ? '基础难度' : '难度'}</span>
+          <span className="field__label">难度</span>
           <select
             className="field__control"
-            value={settings.difficulty}
-            onChange={(event) => onChange({ difficulty: event.target.value as Difficulty })}
+            value={settings.challengeMode ? 'challenge' : settings.difficulty}
+            onChange={(event) => {
+              const value = event.target.value;
+              if (value === 'challenge') {
+                onChange({ challengeMode: true, difficulty: 'expert' });
+              } else {
+                onChange({ challengeMode: false, difficulty: value as Difficulty });
+              }
+            }}
             aria-label="机器人难度"
           >
             {DIFFICULTY_ORDER.map((difficulty) => (
@@ -66,19 +73,8 @@ export function SettingsBar({
                 {DIFFICULTY_LABELS[difficulty]}
               </option>
             ))}
+            <option value="challenge">挑战宗师</option>
           </select>
-        </label>
-
-        <label
-          className="toggle toggle--challenge"
-          title="挑战宗师：本地算法机器人读取你的下注细节与思考时间、动态利用，并用节奏伪装和极化下注施压（仅本地算法机器人；大模型玩家按原设置）"
-        >
-          <input
-            type="checkbox"
-            checked={settings.challengeMode}
-            onChange={(event) => onChange({ challengeMode: event.target.checked })}
-          />
-          <span>挑战宗师</span>
         </label>
 
         <label className="field">
@@ -166,10 +162,8 @@ export function SettingsBar({
         )}
 
         <span className="settings-hint">
-          种子留空 = 每局自动随机（牌不会重复）；填写固定值可复现。人数与种子在点「新局」后生效；难度与挑战宗师即时生效。
-          {settings.challengeMode
-            ? ' 挑战宗师已接管本地算法机器人：基础难度只影响大模型玩家提示词与记录，两者不会同时生效。'
-            : ''}
+          种子留空 = 每局自动随机（牌不会重复）；填写固定值可复现。人数与种子在点「新局」后生效；难度即时生效。
+          难度选「挑战宗师」时，本地算法机器人走挑战宗师档（大模型玩家按自己的设置）。
           <span className="settings-hint__seed" aria-label="本局实际种子">
             {table.phase === 'idle'
               ? '点「开始对局」时生成实际种子'

@@ -15,7 +15,7 @@
 - **玩家名称**：人类名、本地算法机器人名、大模型名均可自定义（`TableConfig.humanName` / `localBotNames` / `llmSeats[].name`）。
 - **体验随机 / 风格**：每个机器人座位在 `createTable` 时由 seed 分配 `styleId`（`src/ai/style.ts` 的 6 种风格），AI 决策时叠加在难度 profile 上（偏移有限）；洗牌与决策使用 `xoshiro128**` + 用途派生随机流；本地机器人台词与思考时间抖动也在 `style.ts` / `useAiDriver.ts`。修改相关代码需更新 `style.test.ts` / `randomness.test.ts`，并保持同 seed 可复现。
 - **真人化决策**：`src/ai/humanModel.ts` 提供跨手公开统计（VPIP / PFR / 攻击性 / 面对下注弃牌率）、情绪、按难度分级的对手利用与真人式失误、fold-equity 近似 EV 尺度；`stateMachine.ts` 在每手结束累计 `statsRaw` 与 `mood`，`aiPlayer.ts` 接入四档决策，座位 HUD 显示跨手画像，LLM 提示词带 `READS` 画像。这些状态只能由公开动作推导，不得读取隐藏信息；改动需更新 `humanModel.test.ts`。
-- **挑战宗师模式**：设置栏开关 `challengeMode`；`src/ai/challenge.ts` 负责宗师原型分配（seed 可复现）、读对手下注细节 / 思考时间、范围极化、计时伪装与 EV 尺度；`stateMachine.ts` 累计每人的 `thinkMs` 统计并把宗师原型传进手牌，`aiPlayer.ts` 在 `options.challenge` 下走独立挑战分支（`profileOverride` 训练时自动关闭）。计时只来自 UI 公开传入的 `thinkMs`，AI 与人类动作都会记录；不得读取隐藏信息。改动需更新 `challenge.test.ts`。
+- **挑战宗师模式**：难度选择「挑战宗师」对应 `challengeMode`；`src/ai/challenge.ts` 负责宗师原型分配（seed 可复现）、读对手下注细节 / 思考时间、范围极化、计时伪装与 EV 尺度；`stateMachine.ts` 累计每人的 `thinkMs` 统计并把宗师原型传进手牌，`aiPlayer.ts` 在 `options.challenge` 下走独立挑战分支（`profileOverride` 训练时自动关闭）。计时只来自 UI 公开传入的 `thinkMs`，AI 与人类动作都会记录；不得读取隐藏信息。改动需更新 `challenge.test.ts`。
 - **GTO / 纳什近似**：`src/ai/gto.ts` 提供均衡频率公式（MDF / 诈唬比例 α / 价值诈唬比 / 底池赔率临界）、单挑短码 push/fold 的 10 桶阈值策略 + 正则型 CFR 求解器与 EV softmax 尺度混合；`GTO_CLOSENESS` 按难度给出 2% / 12% / 30% / 55% / 92% 的均衡接近度，`aiPlayer.ts` 在翻牌后边界混合、平衡诈唬、短码单挑与挑战尺度选择中按接近度使用。接入不得破坏训练语义（`profileOverride` 时关闭），改动需更新 `gto.test.ts` 并保持 `challenge.test.ts` 通过。
 - **深度受限搜索 / 多人谨慎**：`src/ai/search.ts` 提供单步 EV 搜索（过牌 / 跟注 / 弃牌 / 3 种尺度）与多人谨慎系数；`aiPlayer.ts` 在挑战分支按接近度概率采用搜索结果，并给 debug 加「搜索」标记。这是轻量搜索（非 DeepStack 全树/价值网络），改动需更新 `gto.test.ts` 的搜索用例。
 - **容错**：思考型模型正文为空（`finish_reason=length`）时用更短提示 + 更大 token 预算重试一次；支持 `reasoning_content` / `thinking`；仍失败则抛可读 LlmError 并回退本地算法。
@@ -122,7 +122,7 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 - [ ] Node.js 检测语义：已有 Node 时启动器直接跳过安装；缺 Node + `--agent` 时 exit 1 且不安装（需要自动装时用 `--install-node`）
 - [ ] `package.json` 版本号已按约定递增（当前 v0.8.x），并与本次改动在同一个提交
 - [ ] 一键同步数据冒烟：`node scripts/sync-data.mjs --help` 退出码 0；`--list` 能识别同级旧版本目录
-- [ ] 挑战宗师冒烟：`npm test` 中 `challenge.test.ts` 全绿；页面勾选「挑战宗师」后座位显示徽标、调试面板出现宗师原型 / 计时伪装且无 console 报错
+- [ ] 挑战宗师冒烟：`npm test` 中 `challenge.test.ts` 全绿；难度选择「挑战宗师」后座位显示徽标、调试面板出现宗师原型 / 计时伪装且无 console 报错
 - [ ] 工作区没有 `node_modules/`、`dist/`、日志或临时脚本被误加入提交（`.gitignore` 已覆盖）
 
 ## 常见问题

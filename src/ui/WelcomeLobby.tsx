@@ -24,10 +24,9 @@ export function WelcomeLobby({ info, onStartGame, onOpenTutorial }: WelcomeLobby
 
         <div className="lobby-card__facts" aria-label="当前设置">
           <span className="lobby-fact">{info.playerCount} 人桌</span>
-          <span className="lobby-fact">{DIFFICULTY_LABELS[info.difficulty]}难度</span>
-          {info.challengeMode && (
-            <span className="lobby-fact lobby-fact--challenge">挑战宗师</span>
-          )}
+          <span className="lobby-fact">
+            {info.challengeMode ? '挑战宗师难度' : DIFFICULTY_LABELS[info.difficulty] + '难度'}
+          </span>
           <span className={`lobby-fact${info.llmCount > 0 ? ' lobby-fact--llm' : ''}`}>
             {info.llmCount > 0 ? `大模型 ${info.llmCount} 个` : '纯本地算法'}
           </span>
