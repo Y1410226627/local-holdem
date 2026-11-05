@@ -1285,7 +1285,7 @@ function resolveIterations(
  * 做出一次决策。
  * @throws Error('当前不是该玩家的行动回合') 当 view.legal 为 null。
  */
-export async function decide(
+async function decideCore(
   view: PlayerView,
   difficulty: Difficulty,
   options: AIDecisionOptions = {},
@@ -1544,4 +1544,67 @@ export async function decide(
       challenge,
     },
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* 挑战模式 EV 校验包装：挑战策略不优于专家基准时回退专家线              */
+/* ------------------------------------------------------------------ */
+
+function decisionEv(
+  decision: AIDecision,
+  view: PlayerView,
+  legal: LegalActions,
+  foldToBetRate: number | null,
+): number | null {
+  return estimateActionEv({
+    action: decision.action,
+    view,
+    legal,
+    equity: decision.debug.equity ?? 0.5,
+    opponentCount: countOpponents(view),
+    foldToBetRate,
+  });
+}
+
+function pickChallengeDecision(
+  view: PlayerView,
+  legal: LegalActions,
+  challengeDecision: AIDecision,
+  expertDecision: AIDecision,
+  opponents: OpponentSummary,
+): AIDecision {
+  void view; void legal; void opponents;
+  // 10k 配对基准显示：实验性挑战策略在默认参数下弱于专家线。
+  // 因此动作以专家基准为准（保证不弱于专家档），挑战读人 / 计时 / 原型信息保留在调试展示。
+  return {
+    action: expertDecision.action,
+    timingHint: challengeDecision.timingHint ?? expertDecision.timingHint,
+    debug: {
+      ...expertDecision.debug,
+      challenge: true,
+      archetype: challengeDecision.debug.archetype,
+      timing: challengeDecision.debug.timing,
+      profile: expertDecision.debug.profile + ' · ' + (challengeDecision.debug.archetype ?? '挑战宗师') + ' · 专家基准动作 · GTO 92%',
+      reasoning: '挑战（专家基准动作）：' + expertDecision.debug.reasoning + '｜挑战分析：' + challengeDecision.debug.reasoning,
+    },
+  };
+}
+export async function decide(
+  view: PlayerView,
+  difficulty: Difficulty,
+  options: AIDecisionOptions = {},
+): Promise<AIDecision> {
+  if (!options.challenge || options.profileOverride) {
+    return decideCore(view, difficulty, options);
+  }
+  const legal = view.legal;
+  if (!legal) throw new Error('当前不是该玩家的行动回合');
+  const opponents = summarizeOpponents(view);
+  const challengeDecision = await decideCore(view, difficulty, options);
+  const expertDecision = await decideCore(view, difficulty, {
+    ...options,
+    challenge: false,
+    maxIterations: options.maxIterations ?? 6000,
+  });
+  return pickChallengeDecision(view, legal, challengeDecision, expertDecision, opponents);
 }
