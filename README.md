@@ -10,6 +10,7 @@
 - **玩家命名**：你自己、本地算法机器人、大模型玩家的名字都可以自由编写。
 - **体验随机**：每局整桌随机分配机器人风格原型（紧凶 / 松凶 / 紧弱 / 跟注站 / 疯子 / 均衡），在难度允许范围内随机化下注尺度、慢玩 / 抢池、思考节奏，并可开关机器人台词；全部随机由种子派生、可复现。
 - **真人化决策**：机器人有跨手公开统计（VPIP / PFR / 攻击性 / 面对下注弃牌率）、情绪（手感 / 上头）与按难度分级的真人式失误；困难 / 专家会读对手统计并选更优下注尺度，座位显示跨手画像，调试面板标注「读对手 / 手感 / 真人式失误」。
+- **一键同步数据**：升级新版本时双击「一键同步数据」，自动找到旁边的旧版本并把训练参数、大模型经验库、训练报告同步过来（覆盖前自动备份到 `backup/`）；浏览器里的设置与大模型记忆同浏览器同端口自动沿用。
 - **自博弈训练**：`npm run train` / 双击 `训练机器人.bat`（交互式：先问训练轮数 → 给出预计时间 → 确认后开始），同时训练规则引擎机器人（四档参数进化）与大模型机器人（few-shot 经验库 + 可选微调 SFT 数据集）。
 - 只使用虚拟筹码，不含真钱、充值、提现等任何功能。
 
@@ -81,6 +82,14 @@ npm run build    # TypeScript 类型检查 + 生产构建（输出 dist/）
   - 想顺便做一次完整自检（安装依赖 + 全部测试 + 构建），可再双击一次「一键安装」：它是幂等的，检测到本机已有 Node 会直接跳过，不会重复安装系统软件。
 - **覆盖解压到旧文件夹**：旧文件夹的 `node_modules` 会保留，通常直接双击「启动德州扑克」即可。如果新版本调整了依赖导致启动报模块缺失，再双击一次「一键安装」（或在该目录执行 `npm install`）即可。
 
+**懒人方式：一键同步数据（推荐）**
+
+- Windows：双击 **`一键同步数据.bat`**；macOS：双击 **`一键同步数据.command`**；Linux / 终端：`bash 一键同步数据.sh`（也可以用 `npm run sync:data`）。
+- 脚本会先在**当前版本的上一级目录**里自动找其他 `local-holdem` 版本：只找到一个就直接用；找到多个会列出候选（最近更新时间 / 数据文件），回车默认选数据最新的，也可输入序号。
+- **覆盖前自动备份**当前版本文件到 `backup/sync-<时间戳>/`（该目录不提交 git）；`--dry-run` 可先预览计划，`--list` 只列出候选。
+- 旧版本不在旁边时手动指定：`node scripts/sync-data.mjs --from=../旧版本目录`。
+- 同步的是项目文件夹里的数据（训练参数 / 经验库 / 训练报告 / SFT 数据集）；浏览器设置与大模型对局记忆**无需同步**；内存里的当前牌局与历史统计脚本搬不了，想留档请先在旧版本点「导出历史」。
+
 **游玩数据会怎样？** 升级不会清空浏览器数据，但要分清三类数据的位置：
 
 - **浏览器 localStorage（自动保留，无需备份）**：
@@ -95,7 +104,7 @@ npm run build    # TypeScript 类型检查 + 生产构建（输出 dist/）
 - **想留档**：升级前点设置栏「导出历史」，会把当前配置 + 全部手牌历史导出成 JSON 下载到本地（目前只支持导出，没有「导入回游戏」；可用于归档或自己分析）。导出的文件在下载目录，不受升级影响。
 - **自己训练出的参数**（如果你训练过）：`src/ai/data/learnedProfiles.json`、`src/ai/data/llm-experience.json` 与 `training/` 保存在**项目文件夹**里。解压到新文件夹时，新包自带的是发布时的训练产物；想保留自己的成果，升级前先备份，解压后拷到新目录对应位置。⚠️ 覆盖解压到旧文件夹时，新包里的同名文件会覆盖你训练过的文件，务必先备份。
 
-> 每个版本的版本号见 `package.json` 的 `version` 字段（当前为 v0.3.x）。
+> 每个版本的版本号见 `package.json` 的 `version` 字段（当前为 v0.4.x）。
 
 ### 交给 AI Agent 安装
 
@@ -466,6 +475,8 @@ local-holdem
 ├─ 启动德州扑克.bat              # Windows 一键启动（自动装依赖 + 开浏览器）
 ├─ 启动德州扑克.command / .sh    # macOS 双击 / macOS+Linux 终端 一键启动
 ├─ 训练机器人.bat                # Windows 交互式训练（先问轮数/估时/确认）
+├─ 一键同步数据.bat              # Windows 一键同步旧版本数据（训练参数 / 经验库 / 训练产物）
+├─ 一键同步数据.command / .sh    # macOS 双击 / macOS+Linux 终端 一键同步旧版本数据
 ├─ AGENTS.md                     # 给 AI Agent / 自动化工具的安装与验收说明
 ├─ .gitignore / .gitattributes   # 不提交 node_modules、dist；统一换行符
 ├─ index.html
@@ -479,6 +490,7 @@ local-holdem
 │  └─ llm-sft-dataset.jsonl     # 大模型机器人可选微调数据集（JSONL）
 ├─ scripts/
 │  ├─ setup.mjs                 # 一键配置脚本（跨平台，支持 --agent / --check）
+│  ├─ sync-data.mjs             # 一键同步旧版本数据（训练参数 / 经验库 / 训练产物，覆盖前备份）
 │  ├─ install-node.ps1          # Windows：检测/下载/安装官方 Node.js LTS（Ask/Auto/Check）
 │  ├─ launcher-common.sh        # macOS/Linux：检测 Node.js，缺失时官方 pkg 自动安装（可用 Homebrew 备选）
 │  └─ train.ts                  # 自博弈训练 + 参数进化 + 经验库 / SFT 生成
@@ -524,7 +536,7 @@ local-holdem
 │  │  ├─ llmSettings.ts / storage.ts / handMemory.ts / format.ts / types.ts
 │  │  ├─ seed.ts             # 随机种子：留空每局随机、固定值复现
 │  │  └─ styles.css
-│  └─ tests                   # Vitest 测试（22 个文件 / 292 个测试）
+│  └─ tests                   # Vitest 测试（23 个文件 / 303 个测试）
 │     ├─ cards.test.ts / handEvaluator.test.ts / pot.test.ts
 │     ├─ betting.test.ts / engine.test.ts / session.test.ts
 │     ├─ playerView.test.ts / fuzz.test.ts / seedAndReset.test.ts
@@ -532,6 +544,7 @@ local-holdem
 │     ├─ style.test.ts / randomness.test.ts / humanModel.test.ts
 │     ├─ llmSettings.test.ts / llmSeats.test.ts / llmDetect.test.ts
 │     ├─ learnedProfiles.test.ts / trainer.test.ts（11 个训练测试）
+│     ├─ syncData.test.ts（11 个一键同步测试）
 │     └─ integration.test.ts
 ```
 
@@ -543,7 +556,7 @@ local-holdem
 npm test
 ```
 
-当前规模：**22 个测试文件、292 个测试全部通过**（约 1–2 秒）。
+当前规模：**23 个测试文件、303 个测试全部通过**（约 1–2 秒）。
 
 测试覆盖（P0 要求逐项对应）：
 
@@ -564,6 +577,7 @@ npm test
 - 随机种子：留空时每次开局生成不同种子（不同牌堆 / 不同底牌）、固定种子两次开局完全一致、重置筹码可注入新种子、旧种子保持不传时不变。
 - **体验随机 / RNG**：xoshiro128** 同种子可复现、不同用途随机流独立；1000 副牌卡方均匀性、洗牌不修改输入、52 张唯一；风格分配确定且同桌不重复、换种子变化；风格偏移边界与难度档关系；同局面多次独立随机流会出现「随机化」分支且同种子完全确定；本地机器人台词确定性/长度。
 - **真人化决策**：跨手统计汇总与置信度、情绪影响随难度递减、对手利用方向（对弃牌站减诈唬 / 对弃牌多者增诈唬）、真人式失误触发（粘性跟注 / 被大注吓退 / 上头加注）与概率分级、fold-equity 概率单调与 EV 尺度选择、会话统计跨手累计且 VPIP / PFR 不超过 100%、极端统计与情绪下四档动作仍合法、大模型提示词包含 `READS` 对手画像。
+- **一键同步数据**：按 package.json 识别旧版本目录、扫描同级与嵌套目录、候选按数据时间排序、复制与覆盖前备份、内容相同跳过、dry-run 不写文件、参数解析与文件大小格式化。
 
 ---
 
@@ -572,6 +586,7 @@ npm test
 - [x] `npm install` / `npm test` / `npm run build` 通过
 - [x] 一键配置：`node scripts/setup.mjs --agent` 完成环境检查 + 安装 + 测试 + 构建自检，成功输出 `SETUP_RESULT=OK`；[AGENTS.md](AGENTS.md) 可交给 AI Agent 直接执行
 - [x] 一键配置会**先检查本机 Node.js**：已有则跳过；缺失时才询问并自动安装官方 LTS（Windows MSI + UAC / macOS pkg + 密码），`--install-node` 可免询问；无人值守 `--agent` 默认不安装
+- [x] 一键同步数据：自动发现旁边的旧版本目录，同步训练参数 / 经验库 / 训练产物，覆盖前自动备份到 `backup/`，支持 `--dry-run` / `--list` / `--from`
 - [x] `npm run dev` 可启动，首次进入先教程、大厅开局，可完整游玩多手牌
 - [x] 4 档难度可选，行为有可观察差异
 - [x] 真人化决策：跨手统计 / 情绪 / 难度分级失误 / EV 尺度 / 座位画像与调试标注可用，且不读取隐藏信息
@@ -589,14 +604,15 @@ npm test
 | 项目 | 结果 |
 | --- | --- |
 | `npx tsc --noEmit` | 通过，0 错误 |
-| `npm test` | 22 个测试文件、292 个测试全部通过（约 1–2s） |
+| `npm test` | 23 个测试文件、303 个测试全部通过（约 1–2s） |
 | `npm run build` | 通过：58 modules，JS 438.99 kB（gzip 127.34 kB）、CSS 51.33 kB，训练数据已打包 |
-| `node scripts/setup.mjs --agent`（一键配置） | 退出码 0、最后一行 `SETUP_RESULT=OK`；环境检查 Node v26.13.0 / npm 11.20.0 → 安装依赖 → 292 个测试通过 → 构建 58 modules；`一键安装.bat --agent` 同样 exit 0 |
+| `node scripts/setup.mjs --agent`（一键配置） | 退出码 0、最后一行 `SETUP_RESULT=OK`；环境检查 Node v26.13.0 / npm 11.20.0 → 安装依赖 → 303 个测试通过 → 构建 58 modules；`一键安装.bat --agent` 同样 exit 0 |
 | `启动德州扑克.bat` / `训练机器人.bat` 冒烟 | 启动器：检测环境 → 起服务 → `http://localhost:5173` 返回 200（含 `#root`）→ 停止后端口释放；训练入口：`--rounds=0` 被拒绝 exit 1，环境检查通过 |
 | macOS / Linux 启动脚本（Git Bash 5.3 冒烟） | 4 个 `.sh` / `.command` 语法检查通过（兼容 macOS 自带 bash 3.2）；`bash 一键安装.sh --agent` exit 0、输出 `SETUP_RESULT=OK`；`bash 启动德州扑克.sh --no-open` 起服务返回 200 后停止；安装后输入 `n` 正确跳过启动；`.command` 已在 git 索引标记可执行位 |
 | Node.js 自动安装（Windows，`install-node.ps1`） | `-Mode Check`：正确识别本机 Node v26.13.0，架构 x64、官方 LTS v26.13.0、官方 MSI 地址 HTTP 200（约 34.9 MB）、非管理员时走 UAC 提权；`where node` 已命中时**不触发任何安装**（`--install-node` 也直接跳过）；缺 Node + `--agent`：两个 `.bat` 均 exit 1 且不安装；交互询问回答 `n` 正确取消、不下载 |
 | Node.js 自动安装（macOS/Linux，`launcher-common.sh` 单测） | ask / auto / never 三种模式、安装失败回退、“已有 Node 直接静默跳过”、LTS 解析（本地样例 + 真实 nodejs.org `index.json` = v26.13.0）共 10 项断言全部通过；`--agent` 缺 Node 时不安装并 exit 1 |
 | `npm run train -- --rounds=10 --seed=demo-b`（16 worker 并行） | 约 1.9 秒，13,680 手；2/4 档参数更新（接受 2 个变异）；生成 160 条 few-shot 与 100 行 SFT（英文短键格式） |
+| 一键同步数据（单元测试 + CLI 冒烟） | 11 个单测覆盖目录识别 / 候选排序 / 复制与覆盖前备份 / dry-run / 参数解析；CLI 冒烟：`--help` exit 0；`--list --scan-dir=<临时目录>` 正确列出 1 个旧版本及 2 个数据文件；`--from=<临时旧版本> --dry-run` 显示将复制 2 个文件、备份 2 个文件且未写任何文件；`--from=<不存在>` exit 1；`一键同步数据.bat --help` 正常输出，`.sh` / `.command` 语法检查通过 |
 | 真人化决策层（本机模拟 + 单测） | 人机混桌连打 10 手：筹码守恒、VPIP / PFR 均 ≤ 100%；对翻牌后局面交替注入 +1.5 / -1.8 情绪，`maybeHumanMistake` 诊断档命中：入门 2/60、普通 5/60、困难 1/60、专家 0/60（均为「上头乱加注」，随难度递减）；本轮所有 AI 动作均为合法动作。另用 `npm run dev` + headless Edge 连打 5 手：四个座位均出现 `VPIP x% · AF y` 跨手画像（100% / 50% / 25% / 75%，均在 0–100%），console 无报错。单测另覆盖统计汇总、情绪、对手利用、EV、失误分级与 LLM `READS` 提示词 |
 | 体验随机 / 风格（headless Edge 实测） | 同一桌 6 人局中观察到「疯子型 / 松凶型 / 紧凶型」三种风格同时出现（调试面板策略行带风格标签），本地机器人台词气泡「这把我来收。」正常显示，无 console 报错；单元测试另覆盖：同局面 160 次独立随机流中出现带「随机化」理由的决策且同种子完全复现、1000 副牌卡方均匀、风格在同桌不重复且换种子变化 |
 | 大模型“空内容”bug 修复（headless Edge + mock 服务） | mock 第一次返回空正文 + `finish_reason=length` → 前端自动重试：首轮提示词 991 字符、重试提示 152 字符且 `max_tokens` 自动升到 2400；重试返回动作成功，调试面板显示「已在重试后成功」；`reasoning_content` 带 JSON 的单元测试可直接解析；两次均空时错误包含 `finish_reason` 与调参建议；连接测试遇空内容提示“思考 token 用尽” |
@@ -625,11 +641,11 @@ npm test
 
 ## 版本号约定
 
-- 当前版本：**v0.3.2**；`package.json` 与 `package-lock.json` 是唯一版本来源。
+- 当前版本：**v0.4.0**；`package.json` 与 `package-lock.json` 是唯一版本来源。
 - **每次提交都必须同步递增版本号**，并随该次改动一起提交（不要单独提交“只改版本号”的 diff）：
-  - 小修复 / 文档 / 体验微调：递增补丁号（`0.3.1` → `0.3.2` …）；
-  - 成块的新功能 / 明显行为变化：递增次版本（`0.4.0` → `0.5.0` …）；
-  - 提交信息带上版本号，例如 `feat: xxx (v0.3.1)`。
+  - 小修复 / 文档 / 体验微调：递增补丁号（`0.4.1` → `0.4.2` …）；
+  - 成块的新功能 / 明显行为变化：递增次版本（`0.5.0` → `0.6.0` …）；
+  - 提交信息带上版本号，例如 `feat: xxx (v0.4.1)`。
 - 1.0.0 之前视为开发版，不保证 API / 数据格式稳定；1.0.0 起再按语义化版本（破坏性改动升主版本）执行。
 
 ---

@@ -1,7 +1,7 @@
 {
   "name": "local-holdem",
   "private": true,
-  "version": "0.3.2",
+  "version": "0.4.0",
   "description": "本地人机无限注德州扑克：纯前端规则引擎 + 本地算法 AI，零网络、零付费服务",
   "type": "module",
   "scripts": {
@@ -11,7 +11,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "train": "tsx scripts/train.ts",
-    "train:quick": "tsx scripts/train.ts --quick"
+    "train:quick": "tsx scripts/train.ts --quick",
+    "sync:data": "node scripts/sync-data.mjs"
   },
   "dependencies": {
     "react": "^19.3.1",

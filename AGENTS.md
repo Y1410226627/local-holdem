@@ -57,7 +57,7 @@ node scripts/setup.mjs --check          # 只检查环境（启动器内部使�
 | --- | --- | --- |
 | 安装依赖 | `npm install --no-audit --no-fund` | 生成 `node_modules/`，退出码 0 |
 | 类型检查 | `npx tsc --noEmit` | 无输出、退出码 0 |
-| 测试 | `npm test` | `22 passed` 测试文件、`292 passed` 用例 |
+| 测试 | `npm test` | `23 passed` 测试文件、`303 passed` 用例 |
 | 构建 | `npm run build` | 生成 `dist/`，退出码 0 |
 | 训练冒烟 | `npm run train -- --rounds=1 --seed=agent-smoke` | 约 2–4 秒，退出码 0 |
 
@@ -82,7 +82,7 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 6. **可复现种子**：引擎随机性由 `seed + handNo` 决定（`src/game/cards.ts`）；UI 默认每局随机种子（`src/ui/seed.ts`）。
 7. **体验随机**：风格/随机化只能小幅调整合法动作与参数，不得破坏难度档差异、不得读取隐藏信息；所有新增随机必须走种子派生流。真人化层（跨手统计 / 情绪 / 真人式失误）同样只能基于公开动作与自己的状态，不得利用隐藏信息。
 8. 不要改动启动脚本的编码/权限约定：`.bat` 为 **UTF-8 无 BOM + CRLF**；`.sh` / `.command` 为 **LF**，且 `.command` / `.sh` 在 git 索引中需要保留可执行位（`chmod +x` / `git update-index --chmod=+x`）。
-9. **版本号（每次提交必做）**：提交前同步递增 `package.json` 与 `package-lock.json` 的 `version`，并让版本号与本次改动在同一个提交里（当前 v0.3.x：修复 / 文档 / 微调递增补丁号，成块功能递增次版本）；提交信息带上版本号。详见 [README.md](README.md)「版本号约定」。
+9. **版本号（每次提交必做）**：提交前同步递增 `package.json` 与 `package-lock.json` 的 `version`，并让版本号与本次改动在同一个提交里（当前 v0.4.x：修复 / 文档 / 微调递增补丁号，成块功能递增次版本）；提交信息带上版本号。详见 [README.md](README.md)「版本号约定」。
 
 ## 目录速览
 
@@ -91,13 +91,14 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 | `src/game/` | 纯函数规则引擎（牌堆、牌型、下注、边池、状态机、受限视图、日志） |
 | `src/ai/` | 四档难度、范围模型、蒙特卡洛胜率、大模型机器人、训练参数；`data/` 为训练产物 |
 | `src/ui/` | React 界面（教程、大厅、牌桌、设置栏、调试面板、历史回放） |
-| `src/tests/` | Vitest 测试（22 个文件 / 292 个用例） |
+| `src/tests/` | Vitest 测试（23 个文件 / 303 个用例） |
 | `src/ai/style.ts` | 体验随机：机器人风格原型 / 下注尺度偏好 / 本地台词 / 变化率 |
 | `src/ai/humanModel.ts` | 真人化：跨手统计 / 情绪 / 对手利用 / 真人式失误 / fold-equity EV |
 | `src/ai/llmClient.ts` | OpenAI 兼容 chat 客户端（内容提取、思考内容、错误翻译） |
 | `src/ai/llmBot.ts` / `advisor.ts` | 大模型玩家（精简英文提示词、短 JSON、重试、神态）/ AI 军师（中文，按需） |
 | `src/ui/LlmSettingsModal.tsx` / `AdvisorPanel.tsx` | AI 玩家/名称/军师设置 / 军师聊天面板 |
 | `scripts/setup.mjs` | 一键配置：安装依赖 → 测试 → 构建自检（`--agent` / `--check` / `--skip-tests`） |
+| `scripts/sync-data.mjs` | 一键同步旧版本数据（训练参数 / 经验库 / 训练产物 → 当前版本，覆盖前备份到 `backup/`；`--from` / `--dry-run` / `--list`） |
 | `scripts/install-node.ps1` / `scripts/launcher-common.sh` | 启动器共用的 Node.js 检测与自动安装（Windows / macOS；Ask/Auto/Check 或 ask/auto/never 模式） |
 | `scripts/train.ts` | 自博弈训练（参数进化 + few-shot 经验 + SFT 数据集 + 报告） |
 | `training/` | 最近一次训练报告与 SFT 数据集 |
@@ -106,12 +107,13 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 ## 验收清单（DoD）
 
 - [ ] `node scripts/setup.mjs --agent` 退出码 0，输出 `SETUP_RESULT=OK`
-- [ ] `npm test`：22 个测试文件、292 个用例全部通过
+- [ ] `npm test`：23 个测试文件、303 个用例全部通过
 - [ ] `npm run build`：生成 `dist/`，无 TypeScript 错误
 - [ ] `npm run dev -- --host 127.0.0.1 --port 5173 --strictPort` 可启动，HTTP 探测 200
 - [ ] 启动脚本冒烟（按平台）：Windows `启动德州扑克.bat --no-open` / macOS-Linux `bash 启动德州扑克.sh --no-open` 能起服务并返回 200
 - [ ] Node.js 检测语义：已有 Node 时启动器直接跳过安装；缺 Node + `--agent` 时 exit 1 且不安装（需要自动装时用 `--install-node`）
-- [ ] `package.json` 版本号已按约定递增（当前 v0.3.x），并与本次改动在同一个提交
+- [ ] `package.json` 版本号已按约定递增（当前 v0.4.x），并与本次改动在同一个提交
+- [ ] 一键同步数据冒烟：`node scripts/sync-data.mjs --help` 退出码 0；`--list` 能识别同级旧版本目录
 - [ ] 工作区没有 `node_modules/`、`dist/`、日志或临时脚本被误加入提交（`.gitignore` 已覆盖）
 
 ## 常见问题
