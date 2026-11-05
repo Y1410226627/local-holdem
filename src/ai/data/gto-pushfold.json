@@ -1,0 +1,497 @@
+{
+ "generatedAt": "2026-11-05T17:06:17.099Z",
+ "description": "单挑短码 push/fold 阈值策略 CFR 查表（12 起手牌强度桶，4-20BB）",
+ "buckets": 10,
+ "stackMinBB": 4,
+ "stackMaxBB": 20,
+ "iterations": 3000,
+ "boundaries": [
+  0.1403,
+  0.2519,
+  0.3665,
+  0.4781,
+  0.5694,
+  0.6561,
+  0.7572,
+  0.8552,
+  0.9231
+ ],
+ "entries": [
+  {
+   "stackBB": 4,
+   "sbPushFrequency": [
+    0.0001,
+    0.9984,
+    0.9999,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1
+   ],
+   "bbCallFrequency": [
+    0.0001,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1
+   ],
+   "exploitability": 0
+  },
+  {
+   "stackBB": 5,
+   "sbPushFrequency": [
+    0,
+    0.167,
+    0.1694,
+    0.1699,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1
+   ],
+   "bbCallFrequency": [
+    0,
+    0.8306,
+    0.8307,
+    0.834,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1
+   ],
+   "exploitability": 0.0002
+  },
+  {
+   "stackBB": 6,
+   "sbPushFrequency": [
+    0,
+    0.603,
+    0.6032,
+    0.6039,
+    0.9984,
+    0.9984,
+    1,
+    1,
+    1,
+    1
+   ],
+   "bbCallFrequency": [
+    0,
+    0.4062,
+    0.4063,
+    0.4064,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1
+   ],
+   "exploitability": 0.0005
+  },
+  {
+   "stackBB": 7,
+   "sbPushFrequency": [
+    0.0001,
+    0.5481,
+    0.5481,
+    0.5506,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1
+   ],
+   "bbCallFrequency": [
+    0,
+    0,
+    0,
+    0,
+    0.9584,
+    0.9584,
+    1,
+    1,
+    1,
+    1
+   ],
+   "exploitability": 0
+  },
+  {
+   "stackBB": 8,
+   "sbPushFrequency": [
+    0.0001,
+    0.7329,
+    0.7329,
+    0.9764,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1
+   ],
+   "bbCallFrequency": [
+    0,
+    0,
+    0,
+    0,
+    0.4172,
+    0.4172,
+    1,
+    1,
+    1,
+    1
+   ],
+   "exploitability": 0.0002
+  },
+  {
+   "stackBB": 9,
+   "sbPushFrequency": [
+    0,
+    0.0003,
+    0.0003,
+    0.5693,
+    0.5743,
+    1,
+    1,
+    1,
+    1,
+    1
+   ],
+   "bbCallFrequency": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    1,
+    1,
+    1
+   ],
+   "exploitability": 0
+  },
+  {
+   "stackBB": 10,
+   "sbPushFrequency": [
+    0,
+    0,
+    0,
+    0.0001,
+    0.0004,
+    0.9982,
+    1,
+    1,
+    1,
+    1
+   ],
+   "bbCallFrequency": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    1,
+    1,
+    1
+   ],
+   "exploitability": 0
+  },
+  {
+   "stackBB": 11,
+   "sbPushFrequency": [
+    0,
+    0,
+    0,
+    0,
+    0.0001,
+    0.1187,
+    1,
+    1,
+    1,
+    1
+   ],
+   "bbCallFrequency": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.9731,
+    0.9731,
+    1,
+    1
+   ],
+   "exploitability": 0
+  },
+  {
+   "stackBB": 12,
+   "sbPushFrequency": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.2094,
+    1,
+    1,
+    1,
+    1
+   ],
+   "bbCallFrequency": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.8462,
+    0.8462,
+    1,
+    1
+   ],
+   "exploitability": 0.0001
+  },
+  {
+   "stackBB": 13,
+   "sbPushFrequency": [
+    0,
+    0,
+    0,
+    0,
+    0.0012,
+    0.2915,
+    1,
+    1,
+    1,
+    1
+   ],
+   "bbCallFrequency": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.7357,
+    0.7357,
+    1,
+    1
+   ],
+   "exploitability": 0.0003
+  },
+  {
+   "stackBB": 14,
+   "sbPushFrequency": [
+    0,
+    0,
+    0,
+    0,
+    0.0006,
+    0.3713,
+    1,
+    1,
+    1,
+    1
+   ],
+   "bbCallFrequency": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.6207,
+    0.6207,
+    1,
+    1
+   ],
+   "exploitability": 0.0005
+  },
+  {
+   "stackBB": 15,
+   "sbPushFrequency": [
+    0,
+    0,
+    0,
+    0,
+    0.0002,
+    0.435,
+    1,
+    1,
+    1,
+    1
+   ],
+   "bbCallFrequency": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.543,
+    0.543,
+    1,
+    1
+   ],
+   "exploitability": 0.0004
+  },
+  {
+   "stackBB": 16,
+   "sbPushFrequency": [
+    0,
+    0,
+    0,
+    0,
+    0.0003,
+    0.5002,
+    1,
+    1,
+    1,
+    1
+   ],
+   "bbCallFrequency": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.4512,
+    0.4512,
+    1,
+    1
+   ],
+   "exploitability": 0.0004
+  },
+  {
+   "stackBB": 17,
+   "sbPushFrequency": [
+    0,
+    0,
+    0,
+    0,
+    0.0004,
+    0.5547,
+    1,
+    1,
+    1,
+    1
+   ],
+   "bbCallFrequency": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.3843,
+    0.3843,
+    1,
+    1
+   ],
+   "exploitability": 0.0006
+  },
+  {
+   "stackBB": 18,
+   "sbPushFrequency": [
+    0,
+    0,
+    0,
+    0,
+    0.0006,
+    0.5953,
+    1,
+    1,
+    1,
+    1
+   ],
+   "bbCallFrequency": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.3155,
+    0.3155,
+    1,
+    1
+   ],
+   "exploitability": 0.0004
+  },
+  {
+   "stackBB": 19,
+   "sbPushFrequency": [
+    0,
+    0.0001,
+    0.0001,
+    0.0001,
+    0.0015,
+    0.6501,
+    1,
+    1,
+    1,
+    1
+   ],
+   "bbCallFrequency": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.2488,
+    0.2488,
+    1,
+    1
+   ],
+   "exploitability": 0.0006
+  },
+  {
+   "stackBB": 20,
+   "sbPushFrequency": [
+    0,
+    0,
+    0,
+    0,
+    0.0017,
+    0.6811,
+    1,
+    1,
+    1,
+    1
+   ],
+   "bbCallFrequency": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.1885,
+    0.1885,
+    1,
+    1
+   ],
+   "exploitability": 0.0004
+  }
+ ]
+}

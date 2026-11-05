@@ -22,7 +22,8 @@ import {
   getDifficultyProfile,
   type DifficultyProfile,
 } from './difficulty';
-import { gtoBoundaryAdjust, gtoClosenessFor, gtoEvSizeChoice, gtoPushFoldAdvice } from './gto';
+import { gtoBoundaryAdjust, gtoClosenessFor, gtoEvSizeChoice } from './gto';
+import { gtoPushFoldAdvice } from './gtoAdvice';
 import { depthLimitedSearch, estimateActionEv } from './search';
 import {
   applyChallengeVariant,

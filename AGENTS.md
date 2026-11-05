@@ -60,7 +60,7 @@ node scripts/setup.mjs --check          # 只检查环境（启动器内部使�
 | --- | --- | --- |
 | 安装依赖 | `npm install --no-audit --no-fund` | 生成 `node_modules/`，退出码 0 |
 | 类型检查 | `npx tsc --noEmit` | 无输出、退出码 0 |
-| 测试 | `npm test` | `25 passed` 测试文件、`346 passed` 用例 |
+| 测试 | `npm test` | `26 passed` 测试文件、`352 passed` 用例 |
 | 构建 | `npm run build` | 生成 `dist/`，退出码 0 |
 | 训练冒烟 | `npm run train -- --rounds=1 --seed=agent-smoke` | 约 2–4 秒，退出码 0 |
 
@@ -85,7 +85,7 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 6. **可复现种子**：引擎随机性由 `seed + handNo` 决定（`src/game/cards.ts`）；UI 默认每局随机种子（`src/ui/seed.ts`）。
 7. **体验随机**：风格/随机化只能小幅调整合法动作与参数，不得破坏难度档差异、不得读取隐藏信息；所有新增随机必须走种子派生流。真人化层（跨手统计 / 情绪 / 真人式失误）同样只能基于公开动作与自己的状态，不得利用隐藏信息。
 8. 不要改动启动脚本的编码/权限约定：`.bat` 为 **UTF-8 无 BOM + CRLF**；`.sh` / `.command` 为 **LF**，且 `.command` / `.sh` 在 git 索引中需要保留可执行位（`chmod +x` / `git update-index --chmod=+x`）。
-9. **版本号（每次提交必做）**：提交前同步递增 `package.json` 与 `package-lock.json` 的 `version`，并让版本号与本次改动在同一个提交里（当前 v0.7.x：修复 / 文档 / 微调递增补丁号，成块功能递增次版本）；提交信息带上版本号。详见 [README.md](README.md)「版本号约定」。
+9. **版本号（每次提交必做）**：提交前同步递增 `package.json` 与 `package-lock.json` 的 `version`，并让版本号与本次改动在同一个提交里（当前 v0.8.x：修复 / 文档 / 微调递增补丁号，成块功能递增次版本）；提交信息带上版本号。详见 [README.md](README.md)「版本号约定」。
 
 ## 目录速览
 
@@ -99,6 +99,8 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 | `src/ai/humanModel.ts` | 真人化：跨手统计 / 情绪 / 对手利用 / 真人式失误 / fold-equity EV |
 | `src/ai/challenge.ts` | 挑战宗师：宗师原型 / 读计时与下注细节 / 计时伪装 / range 极化 / EV 尺度 |
 | `src/ai/gto.ts` | GTO 近似：均衡频率公式 / 阈值策略 CFR push-fold / EV 尺度混合 / 难度均衡接近度 |
+| `src/ai/gtoTable.ts` | B1：离线 push/fold 策略表加载 + 筹码深度插值 |
+| `src/ai/gtoAdvice.ts` | B1：短码单挑建议（查表优先，表外回退在线求解） |
 | `src/ai/search.ts` | 深度受限搜索（单步 EV）+ 多人谨慎系数（DeepStack / Pluribus 启发） |
 | `src/ai/llmClient.ts` | OpenAI 兼容 chat 客户端（内容提取、思考内容、错误翻译） |
 | `src/ai/llmBot.ts` / `advisor.ts` | 大模型玩家（精简英文提示词、短 JSON、重试、神态）/ AI 军师（中文，按需） |
@@ -113,12 +115,12 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 ## 验收清单（DoD）
 
 - [ ] `node scripts/setup.mjs --agent` 退出码 0，输出 `SETUP_RESULT=OK`
-- [ ] `npm test`：25 个测试文件、346 个用例全部通过
+- [ ] `npm test`：26 个测试文件、352 个用例全部通过
 - [ ] `npm run build`：生成 `dist/`，无 TypeScript 错误
 - [ ] `npm run dev -- --host 127.0.0.1 --port 5173 --strictPort` 可启动，HTTP 探测 200
 - [ ] 启动脚本冒烟（按平台）：Windows `启动德州扑克.bat --no-open` / macOS-Linux `bash 启动德州扑克.sh --no-open` 能起服务并返回 200
 - [ ] Node.js 检测语义：已有 Node 时启动器直接跳过安装；缺 Node + `--agent` 时 exit 1 且不安装（需要自动装时用 `--install-node`）
-- [ ] `package.json` 版本号已按约定递增（当前 v0.7.x），并与本次改动在同一个提交
+- [ ] `package.json` 版本号已按约定递增（当前 v0.8.x），并与本次改动在同一个提交
 - [ ] 一键同步数据冒烟：`node scripts/sync-data.mjs --help` 退出码 0；`--list` 能识别同级旧版本目录
 - [ ] 挑战宗师冒烟：`npm test` 中 `challenge.test.ts` 全绿；页面勾选「挑战宗师」后座位显示徽标、调试面板出现宗师原型 / 计时伪装且无 console 报错
 - [ ] 工作区没有 `node_modules/`、`dist/`、日志或临时脚本被误加入提交（`.gitignore` 已覆盖）

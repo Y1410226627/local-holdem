@@ -334,6 +334,12 @@ npm run train        # 全量自博弈训练（约 3 秒，默认 2 轮）
 - **调试可见**：挑战 / 专家的调试策略行会带 `GTO 92%` / `GTO 55%` 标记；短码单挑决策理由会注明「GTO 短码（x.xBB 单挑）」；搜索介入时理由会写「深度受限搜索」。
 - 实现与测试：`src/ai/gto.ts`、`src/ai/search.ts`、`src/tests/gto.test.ts`；所有难度仍只使用 PlayerView 公开信息，不作弊。
 
+#### 方案 B 进度：B1 已落地
+
+- **离线生成**：`npm run gto:tables` → `src/ai/data/gto-pushfold.json`（4–20BB 共 17 个深度、10 个强度桶、约 4.9 KB；阈值 CFR 可利用度 < 0.01）。
+- **运行时查表**：`gtoTable.ts` 精确命中 / 线性插值；`gtoAdvice.ts` 优先查表、表外回退在线求解；短码理由会注明「查表 / 插值」。
+- **下一步 B2/B3**：Turn/River 子博弈 endgame 求解 + continuation-value 表（预计再 5–9 人日，尚未开始）。
+
 #### 论文与开源项目：借鉴了什么 / 没借鉴什么
 
 读了 [Libratus (Science 2017)](https://www.science.org/doi/10.1126/science.aao1733)、[DeepStack (Science 2017)](https://www.science.org/doi/10.1126/science.aam6960)、[Pluribus (Science 2019)](https://www.science.org/doi/10.1126/science.aay2400)、[ReBeL (arXiv:2007.13544)](https://arxiv.org/abs/2007.13544) 的公开摘要 / 资料，以及 [facebookresearch/rebel](https://github.com/facebookresearch/rebel)、[Sandholm-Lab/LibratusEndgames](https://github.com/Sandholm-Lab/LibratusEndgames)、[rlcard](https://github.com/datamllab/rlcard)、[cpp-cfr](https://github.com/bakanaouji/cpp-cfr)、[CFR-Poker-AI-Engine-Texas-Holdem](https://github.com/dberwegerp/CFR-Poker-AI-Engine-Texas-Holdem)、[TexasHoldem-Poker-AI-HeadsUp-Engine](https://github.com/masterai-top/TexasHoldem-Poker-AI-HeadsUp-Engine) 的项目说明，只借鉴概念、不复制代码：
@@ -570,6 +576,8 @@ local-holdem
 │  │  ├─ humanModel.ts        # 真人化：跨手统计 / 情绪 / 对手利用 / fold-equity EV
 │  │  ├─ challenge.ts          # 挑战宗师：原型 / 读计时与下注 / 计时伪装 / EV 极化
 │  │  ├─ gto.ts               # GTO 近似：均衡频率 / 阈值 CFR push-fold / 尺度混合
+│  │  ├─ gtoTable.ts          # B1：离线 push-fold 查表 + 插值
+│  │  ├─ gtoAdvice.ts         # B1：短码建议（查表优先，表外回退求解）
 │  │  ├─ search.ts            # 深度受限搜索 + 多人谨慎（DeepStack / Pluribus 启发）
 │  │  ├─ llmMemory.ts         # 大模型对局记忆（localStorage，每模型 80 条）
 │  │  ├─ data/
@@ -590,7 +598,7 @@ local-holdem
 │  │  ├─ llmSettings.ts / storage.ts / handMemory.ts / format.ts / types.ts
 │  │  ├─ seed.ts             # 随机种子：留空每局随机、固定值复现
 │  │  └─ styles.css
-│  └─ tests                   # Vitest 测试（25 个文件 / 346 个测试）
+│  └─ tests                   # Vitest 测试（26 个文件 / 352 个测试）
 │     ├─ cards.test.ts / handEvaluator.test.ts / pot.test.ts
 │     ├─ betting.test.ts / engine.test.ts / session.test.ts
 │     ├─ playerView.test.ts / fuzz.test.ts / seedAndReset.test.ts
@@ -612,7 +620,7 @@ local-holdem
 npm test
 ```
 
-当前规模：**25 个测试文件、346 个测试全部通过**（约 1–2 秒）。
+当前规模：**26 个测试文件、352 个测试全部通过**（约 1–2 秒）。
 
 测试覆盖（P0 要求逐项对应）：
 
@@ -665,9 +673,9 @@ npm test
 | 项目 | 结果 |
 | --- | --- |
 | `npx tsc --noEmit` | 通过，0 错误 |
-| `npm test` | 25 个测试文件、346 个测试全部通过（约 1–2s） |
-| `npm run build` | 通过：61 modules，JS 461.96 kB（gzip 135.26 kB）、CSS 51.64 kB，训练数据已打包 |
-| `node scripts/setup.mjs --agent`（一键配置） | 退出码 0、最后一行 `SETUP_RESULT=OK`；环境检查 Node v26.13.0 / npm 11.20.0 → 安装依赖 → 346 个测试通过 → 构建 61 modules；`一键安装.bat --agent` 同样 exit 0 |
+| `npm test` | 26 个测试文件、352 个测试全部通过（约 1–2s） |
+| `npm run build` | 通过：62 modules，JS 465.24 kB（gzip 136.21 kB）、CSS 51.64 kB，训练数据已打包 |
+| `node scripts/setup.mjs --agent`（一键配置） | 退出码 0、最后一行 `SETUP_RESULT=OK`；环境检查 Node v26.13.0 / npm 11.20.0 → 安装依赖 → 352 个测试通过 → 构建 61 modules；`一键安装.bat --agent` 同样 exit 0 |
 | `启动德州扑克.bat` / `训练机器人.bat` 冒烟 | 启动器：检测环境 → 起服务 → `http://localhost:5173` 返回 200（含 `#root`）→ 停止后端口释放；训练入口：`--rounds=0` 被拒绝 exit 1，环境检查通过 |
 | macOS / Linux 启动脚本（Git Bash 5.3 冒烟） | 4 个 `.sh` / `.command` 语法检查通过（兼容 macOS 自带 bash 3.2）；`bash 一键安装.sh --agent` exit 0、输出 `SETUP_RESULT=OK`；`bash 启动德州扑克.sh --no-open` 起服务返回 200 后停止；安装后输入 `n` 正确跳过启动；`.command` 已在 git 索引标记可执行位 |
 | Node.js 自动安装（Windows，`install-node.ps1`） | `-Mode Check`：正确识别本机 Node v26.13.0，架构 x64、官方 LTS v26.13.0、官方 MSI 地址 HTTP 200（约 34.9 MB）、非管理员时走 UAC 提权；`where node` 已命中时**不触发任何安装**（`--install-node` 也直接跳过）；缺 Node + `--agent`：两个 `.bat` 均 exit 1 且不安装；交互询问回答 `n` 正确取消、不下载 |
@@ -704,11 +712,11 @@ npm test
 
 ## 版本号约定
 
-- 当前版本：**v0.7.0**；`package.json` 与 `package-lock.json` 是唯一版本来源。
+- 当前版本：**v0.8.0**；`package.json` 与 `package-lock.json` 是唯一版本来源。
 - **每次提交都必须同步递增版本号**，并随该次改动一起提交（不要单独提交“只改版本号”的 diff）：
-  - 小修复 / 文档 / 体验微调：递增补丁号（`0.7.1` → `0.7.2` …）；
-  - 成块的新功能 / 明显行为变化：递增次版本（`0.8.0` → `0.9.0` …）；
-  - 提交信息带上版本号，例如 `feat: xxx (v0.7.1)`。
+  - 小修复 / 文档 / 体验微调：递增补丁号（`0.8.1` → `0.8.2` …）；
+  - 成块的新功能 / 明显行为变化：递增次版本（`0.9.0` → `0.10.0` …）；
+  - 提交信息带上版本号，例如 `feat: xxx (v0.8.1)`。
 - 1.0.0 之前视为开发版，不保证 API / 数据格式稳定；1.0.0 起再按语义化版本（破坏性改动升主版本）执行。
 
 ---

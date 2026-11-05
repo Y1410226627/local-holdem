@@ -21,10 +21,10 @@ import {
   gtoBoundaryAdjust,
   gtoClosenessFor,
   gtoEvSizeChoice,
-  gtoPushFoldAdvice,
   minimumDefenseFrequency,
   solvePushFold,
 } from '../ai/gto';
+import { gtoPushFoldAdvice } from '../ai/gtoAdvice';
 import { CC, makeHand } from './helpers';
 import type { PlayerView } from '../game/playerView';
 import { depthLimitedSearch, estimateActionEv, multiwayCaution } from '../ai/search';
