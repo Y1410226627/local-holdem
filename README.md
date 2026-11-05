@@ -596,6 +596,17 @@ npm test
 
 ---
 
+## 版本号约定
+
+- 当前版本：**v0.3.0**；`package.json` 与 `package-lock.json` 是唯一版本来源。
+- **每次提交都必须同步递增版本号**，并随该次改动一起提交（不要单独提交“只改版本号”的 diff）：
+  - 小修复 / 文档 / 体验微调：递增补丁号（`0.3.1` → `0.3.2` …）；
+  - 成块的新功能 / 明显行为变化：递增次版本（`0.4.0` → `0.5.0` …）；
+  - 提交信息带上版本号，例如 `feat: xxx (v0.3.1)`。
+- 1.0.0 之前视为开发版，不保证 API / 数据格式稳定；1.0.0 起再按语义化版本（破坏性改动升主版本）执行。
+
+---
+
 ## 上传 / 分享到 GitHub
 
 仓库已准备好 `.gitignore`（不提交 `node_modules/`、`dist/` 等）与 `.gitattributes`（统一换行符），源码 + 截图 + 训练产物约 1.7 MB，可直接托管。首次上传（把 `<你的用户名>` / `<仓库名>` 换成实际值）：
@@ -603,7 +614,7 @@ npm test
 ```bash
 git init -b main
 git add .
-git commit -m "feat: 本地人机德州扑克 v1.0"
+git commit -m "feat: 本地人机德州扑克 v0.3.0"
 git remote add origin git@github.com:<你的用户名>/<仓库名>.git
 git push -u origin main
 ```
