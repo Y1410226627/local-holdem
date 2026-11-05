@@ -83,6 +83,8 @@ export interface AiDebugRecord {
   timing?: string;
   /** 挑战模式：宗师原型名称。 */
   archetype?: string;
+  /** 该决策是否来自挑战宗师分支。 */
+  challenge?: boolean;
 }
 
 /** 页面顶部的提示（错误 / 信息）。 */

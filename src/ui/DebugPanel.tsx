@@ -1,5 +1,6 @@
 /** 调试面板：展示最近 10 条 AI 决策（动作、胜率、赔率、模拟次数与中文依据）。 */
 import { DIFFICULTY_LABELS } from '../game/types';
+import { CHALLENGE_MODE_LABEL } from '../ai/difficulty';
 import { formatPercent, STREET_LABELS } from './format';
 import type { AiDebugRecord } from './types';
 
@@ -39,7 +40,9 @@ export function DebugPanel({ records }: DebugPanelProps) {
             <article className="debug-card" key={record.id}>
               <div className="debug-card__head">
                 <span className="debug-card__player">{record.playerName}</span>
-                <span className="diff-badge">{DIFFICULTY_LABELS[record.difficulty]}</span>
+                <span className="diff-badge">
+                  {record.challenge ? CHALLENGE_MODE_LABEL : DIFFICULTY_LABELS[record.difficulty]}
+                </span>
                 <span
                   className={`debug-source${
                     record.source === 'llm' ? ' debug-source--llm' : ' debug-source--local'

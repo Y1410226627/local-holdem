@@ -234,6 +234,7 @@ export function useAiDriver({
           talk,
           timing: decision.debug.timing,
           archetype: decision.debug.archetype,
+          challenge: decision.debug.challenge,
         });
       } catch (error) {
         if (!isCurrent()) return;

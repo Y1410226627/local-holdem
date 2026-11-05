@@ -109,6 +109,8 @@ export interface AIDebugInfo {
   rawResponse?: string;
   /** 挑战模式的计时伪装策略（调试用）。 */
   timing?: string;
+  /** 是否走挑战宗师分支（本地算法 AI）。 */
+  challenge?: boolean;
   /** 挑战模式的宗师原型名称。 */
   archetype?: string;
 }
@@ -1539,6 +1541,7 @@ export async function decide(
       reasoning,
       timing: timingText ?? undefined,
       archetype: challenge ? challengeArchetypeLabel(archetypeId) : undefined,
+      challenge,
     },
   };
 }

@@ -54,7 +54,7 @@ export function SettingsBar({
     <section className="settings-bar" aria-label="牌局设置">
       <div className="settings-bar__fields">
         <label className="field">
-          <span className="field__label">难度</span>
+          <span className="field__label">{settings.challengeMode ? '基础难度' : '难度'}</span>
           <select
             className="field__control"
             value={settings.difficulty}
@@ -167,6 +167,9 @@ export function SettingsBar({
 
         <span className="settings-hint">
           种子留空 = 每局自动随机（牌不会重复）；填写固定值可复现。人数与种子在点「新局」后生效；难度与挑战宗师即时生效。
+          {settings.challengeMode
+            ? ' 挑战宗师已接管本地算法机器人：基础难度只影响大模型玩家提示词与记录，两者不会同时生效。'
+            : ''}
           <span className="settings-hint__seed" aria-label="本局实际种子">
             {table.phase === 'idle'
               ? '点「开始对局」时生成实际种子'

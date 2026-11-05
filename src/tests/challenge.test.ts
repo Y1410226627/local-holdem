@@ -605,3 +605,25 @@ describe('引擎计时写入与跨手统计', () => {
     expect(decision.debug.profile).not.toContain('挑战');
   });
 });
+
+describe('挑战分支与基础难度的关系（不会双开打架）', () => {
+  it('挑战决策 debug.challenge 为 true；普通难度决策不带挑战标记', async () => {
+    const hand = playToStreet(
+      makeHand({
+        seed: 'challenge-flag',
+        holeCards: [CC('As Kd'), CC('Qh Jh'), CC('9s 9c'), CC('7c 2d')],
+        board: CC('2h 5s 9d Tc 3c'),
+      }),
+      'flop',
+    );
+    const index = hand.actingIndex!;
+    const actor = hand.players[index];
+    const view = buildPlayerView(hand, actor.id, 'challenge-flag');
+    const challenge = await decide(view, 'normal', { challenge: true, maxIterations: 120 });
+    expect(challenge.debug.challenge).toBe(true);
+    expect(challenge.debug.profile).toContain('宗师');
+    const base = await decide(view, 'normal', { maxIterations: 120 });
+    expect(base.debug.challenge).toBe(false);
+    expect(base.debug.profile).not.toContain('宗师');
+  });
+});

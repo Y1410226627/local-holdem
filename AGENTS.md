@@ -60,7 +60,7 @@ node scripts/setup.mjs --check          # 只检查环境（启动器内部使�
 | --- | --- | --- |
 | 安装依赖 | `npm install --no-audit --no-fund` | 生成 `node_modules/`，退出码 0 |
 | 类型检查 | `npx tsc --noEmit` | 无输出、退出码 0 |
-| 测试 | `npm test` | `28 passed` 测试文件、`358 passed` 用例 |
+| 测试 | `npm test` | `28 passed` 测试文件、`359 passed` 用例 |
 | 构建 | `npm run build` | 生成 `dist/`，退出码 0 |
 | 训练冒烟 | `npm run train -- --rounds=1 --seed=agent-smoke` | 约 2–4 秒，退出码 0 |
 

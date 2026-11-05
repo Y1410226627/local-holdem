@@ -598,7 +598,7 @@ local-holdem
 │  │  ├─ llmSettings.ts / storage.ts / handMemory.ts / format.ts / types.ts
 │  │  ├─ seed.ts             # 随机种子：留空每局随机、固定值复现
 │  │  └─ styles.css
-│  └─ tests                   # Vitest 测试（28 个文件 / 358 个测试）
+│  └─ tests                   # Vitest 测试（28 个文件 / 359 个测试）
 │     ├─ cards.test.ts / handEvaluator.test.ts / pot.test.ts
 │     ├─ betting.test.ts / engine.test.ts / session.test.ts
 │     ├─ playerView.test.ts / fuzz.test.ts / seedAndReset.test.ts
@@ -620,7 +620,7 @@ local-holdem
 npm test
 ```
 
-当前规模：**28 个测试文件、358 个测试全部通过**（约 1–2 秒）。
+当前规模：**28 个测试文件、359 个测试全部通过**（约 1–2 秒）。
 
 测试覆盖（P0 要求逐项对应）：
 
@@ -673,9 +673,9 @@ npm test
 | 项目 | 结果 |
 | --- | --- |
 | `npx tsc --noEmit` | 通过，0 错误 |
-| `npm test` | 28 个测试文件、358 个测试全部通过（约 1–2s） |
+| `npm test` | 28 个测试文件、359 个测试全部通过（约 1–2s） |
 | `npm run build` | 通过：62 modules，JS 465.24 kB（gzip 136.21 kB）、CSS 51.64 kB，训练数据已打包 |
-| `node scripts/setup.mjs --agent`（一键配置） | 退出码 0、最后一行 `SETUP_RESULT=OK`；环境检查 Node v26.13.0 / npm 11.20.0 → 安装依赖 → 358 个测试通过 → 构建 61 modules；`一键安装.bat --agent` 同样 exit 0 |
+| `node scripts/setup.mjs --agent`（一键配置） | 退出码 0、最后一行 `SETUP_RESULT=OK`；环境检查 Node v26.13.0 / npm 11.20.0 → 安装依赖 → 359 个测试通过 → 构建 61 modules；`一键安装.bat --agent` 同样 exit 0 |
 | `启动德州扑克.bat` / `训练机器人.bat` 冒烟 | 启动器：检测环境 → 起服务 → `http://localhost:5173` 返回 200（含 `#root`）→ 停止后端口释放；训练入口：`--rounds=0` 被拒绝 exit 1，环境检查通过 |
 | macOS / Linux 启动脚本（Git Bash 5.3 冒烟） | 4 个 `.sh` / `.command` 语法检查通过（兼容 macOS 自带 bash 3.2）；`bash 一键安装.sh --agent` exit 0、输出 `SETUP_RESULT=OK`；`bash 启动德州扑克.sh --no-open` 起服务返回 200 后停止；安装后输入 `n` 正确跳过启动；`.command` 已在 git 索引标记可执行位 |
 | Node.js 自动安装（Windows，`install-node.ps1`） | `-Mode Check`：正确识别本机 Node v26.13.0，架构 x64、官方 LTS v26.13.0、官方 MSI 地址 HTTP 200（约 34.9 MB）、非管理员时走 UAC 提权；`where node` 已命中时**不触发任何安装**（`--install-node` 也直接跳过）；缺 Node + `--agent`：两个 `.bat` 均 exit 1 且不安装；交互询问回答 `n` 正确取消、不下载 |
