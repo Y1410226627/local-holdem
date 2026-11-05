@@ -304,7 +304,7 @@ function trainingPage(): ReactNode {
           输入 <code>Y</code> 确认后才开始训练；训练全程本地运行、不需要联网。
         </li>
         <li>
-          <strong>两类机器人都被训练：</strong>规则引擎机器人通过自博弈进化四档参数；
+          <strong>两类机器人都被训练：</strong>规则引擎机器人通过自博弈进化四档参数，设置栏还可开启「挑战宗师」读人模式；
           大模型机器人则获得 few-shot 经验库与可选微调数据集（<code>training/llm-sft-dataset.jsonl</code>）。
           训练报告见 <code>training/REPORT.md</code>。
         </li>
@@ -330,7 +330,7 @@ function trainingPage(): ReactNode {
         <div>
           <h3 className="tutorial-h3">推荐流程</h3>
           <ul className="tutorial-list">
-            <li>先选人数与难度（2–6 人，四档难度）。</li>
+            <li>先选人数与难度（2–6 人，四档难度；可再勾选「挑战宗师」）。</li>
             <li>需要大模型时先在「AI 玩家设置」测试连接，再点「开始对局」。</li>
             <li>新手先用「入门 / 普通」难度，熟悉位置与下注尺度。</li>
             <li>想复盘时打开「调试模式」与「牌局历史」。</li>
@@ -417,7 +417,7 @@ const PAGES: Array<{ title: string; subtitle: string; content: ReactNode }> = [
   },
   {
     title: 'AI 难度与大模型机器人',
-    subtitle: '四档本地算法 + 两个可选大模型',
+    subtitle: '四档本地算法 + 挑战宗师 + 可选大模型',
     content: aiPage(),
   },
   {

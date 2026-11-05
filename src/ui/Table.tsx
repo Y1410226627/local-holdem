@@ -1,6 +1,7 @@
 /** 牌桌：椭圆桌面、公共牌、底池、环绕座位与结算信息。 */
 import type { HandState, PublicPlayerStats, ShowdownEntry, TableState } from '../game/types';
 import { toPublicStats } from '../game/stateMachine';
+import { CHALLENGE_MODE_LABEL } from '../ai/difficulty';
 import { DIFFICULTY_LABELS } from '../game/types';
 import { formatChips, resultSummary, STREET_LABELS } from './format';
 import { PlayerSeat, type SeatData, type SeatPosition } from './PlayerSeat';
@@ -134,6 +135,12 @@ export function Table({
       kind: handPlayer?.kind ?? tablePlayer.kind,
       llmSlot: handPlayer?.llmSlot ?? tablePlayer.llmSlot,
       stats: toPublicStats(tablePlayer.statsRaw),
+      difficultyLabel:
+        table.config.challengeMode &&
+        !(handPlayer?.isHuman ?? tablePlayer.isHuman) &&
+        (handPlayer?.kind ?? tablePlayer.kind) === 'local'
+          ? CHALLENGE_MODE_LABEL
+          : undefined,
     };
   });
 
@@ -200,7 +207,7 @@ export function Table({
             盲注 {formatChips(table.config.smallBlind)}/{formatChips(table.config.bigBlind)}
           </span>
           <span className="table-chip table-chip--muted">
-            机器人 {DIFFICULTY_LABELS[table.config.difficulty]}
+            机器人 {table.config.challengeMode ? CHALLENGE_MODE_LABEL : DIFFICULTY_LABELS[table.config.difficulty]}
           </span>
         </div>
         <div className="table-toolbar__right">

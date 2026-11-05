@@ -3817,3 +3817,24 @@ select.field__control option {
   line-height: 1.4;
   color: var(--gold-strong);
 }
+/* 挑战宗师模式：金色强调 */
+.toggle--challenge span {
+  color: var(--gold);
+  font-weight: 700;
+}
+
+.toggle--challenge input:checked + span {
+  text-shadow: 0 0 8px rgba(232, 201, 119, 0.5);
+}
+
+.seat__difficulty--challenge {
+  color: #ffe6a3;
+  border-color: rgba(232, 201, 119, 0.6);
+  background: rgba(232, 201, 119, 0.22);
+  box-shadow: 0 0 10px rgba(232, 201, 119, 0.25);
+}
+
+.lobby-fact--challenge {
+  color: var(--gold);
+  border-color: rgba(232, 201, 119, 0.4);
+}

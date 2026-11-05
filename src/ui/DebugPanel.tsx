@@ -74,6 +74,13 @@ export function DebugPanel({ records }: DebugPanelProps) {
                 />
               </div>
               {record.profile && <div className="debug-card__profile">策略：{record.profile}</div>}
+              {(record.archetype || record.timing) && (
+                <div className="debug-card__profile">
+                  {record.archetype ? `宗师原型：${record.archetype}` : ''}
+                  {record.archetype && record.timing ? ' · ' : ''}
+                  {record.timing ? `计时伪装：${record.timing}` : ''}
+                </div>
+              )}
               {record.fallbackReason && (
                 <div className="debug-card__fallback">回退原因：{record.fallbackReason}</div>
               )}

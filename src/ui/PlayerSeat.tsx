@@ -24,6 +24,8 @@ export interface SeatData {
   llmSlot?: number;
   /** 跨手公开行为统计（手数够多时显示 VPIP / 攻击性画像）。 */
   stats?: PublicPlayerStats;
+  /** 难度徽标文案覆盖（挑战模式下显示「挑战宗师」）。 */
+  difficultyLabel?: string;
 }
 
 export interface SeatPosition {
@@ -68,6 +70,10 @@ export function PlayerSeat({
   const afText = stats ? stats.aggression.toFixed(1) : '0.0';
   const foldText =
     stats && stats.foldToBetRate !== null ? Math.round(stats.foldToBetRate * 100) + '%' : '—';
+  const thinkText =
+    stats && typeof stats.avgThinkMs === 'number'
+      ? ' · 均思考 ' + (stats.avgThinkMs / 1000).toFixed(1) + 's'
+      : '';
   const statsTitle = stats
     ? '跨手画像（' +
       stats.hands +
@@ -78,7 +84,8 @@ export function PlayerSeat({
       '% · 攻击性 ' +
       afText +
       ' · 面对下注弃牌 ' +
-      foldText
+      foldText +
+      thinkText
     : '';
 
   const className = [
@@ -121,9 +128,18 @@ export function PlayerSeat({
               {seat.name}
             </span>
             {seat.kind === 'llm' && <span className="seat__llm-badge">LLM</span>}
-            {!seat.isHuman && seat.kind !== 'llm' && seat.difficulty && (
-              <span className="seat__difficulty">{DIFFICULTY_LABELS[seat.difficulty]}</span>
-            )}
+            {!seat.isHuman &&
+              seat.kind !== 'llm' &&
+              (seat.difficultyLabel || seat.difficulty) && (
+                <span
+                  className={`seat__difficulty${
+                    seat.difficultyLabel ? ' seat__difficulty--challenge' : ''
+                  }`}
+                >
+                  {seat.difficultyLabel ??
+                    (seat.difficulty ? DIFFICULTY_LABELS[seat.difficulty] : '')}
+                </span>
+              )}
           </div>
           <div className="seat__stack">
             筹码 <strong>{formatChips(seat.stack)}</strong>

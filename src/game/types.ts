@@ -92,6 +92,12 @@ export interface PublicPlayerStats {
   foldToBetRate: number | null;
   /** 本会话累计净赢筹码。 */
   netChips: number;
+  /** 跨手平均思考时间（毫秒，样本 >= 2 才有）。 */
+  avgThinkMs?: number;
+  /** 跨手主动下注 / 加注的平均思考时间（毫秒）。 */
+  aggressiveAvgThinkMs?: number;
+  /** 跨手跟注 / 过牌的平均思考时间（毫秒）。 */
+  passiveAvgThinkMs?: number;
 }
 
 /** 引擎内部原始统计计数（不直接暴露给 AI）。 */
@@ -106,6 +112,15 @@ export interface PlayerStatsRaw {
   facedBet: number;
   foldedToBet: number;
   netChips: number;
+  /** 有计时样本的动作数（thinkMs > 0）。 */
+  thinkSamples: number;
+  thinkMsTotal: number;
+  /** 主动下注 / 加注 / 全下的计时样本。 */
+  aggressiveThinkSamples: number;
+  aggressiveThinkMsTotal: number;
+  /** 跟注 / 过牌的计时样本。 */
+  passiveThinkSamples: number;
+  passiveThinkMsTotal: number;
 }
 
 /** 玩家动作。下注/加注的 amount 表示“加到”的街道累计投入（raise-to），而非增量。 */
@@ -119,6 +134,12 @@ export type PlayerAction =
 
 export type ActionType = PlayerAction['type'];
 
+/** 玩家动作的附加元信息（不影响规则判定；用于挑战模式读取计时信息）。 */
+export interface ActionMeta {
+  /** 本次决策实际用时（毫秒）；<= 0 或缺失表示没有计时数据。 */
+  thinkMs?: number;
+}
+
 export interface PlayerState {
   id: number;
   name: string;
@@ -130,6 +151,8 @@ export interface PlayerState {
   llmSlot?: number;
   /** 机器人风格原型 id（0..BOT_STYLE_COUNT-1；体验随机层使用，人类为 undefined）。 */
   styleId?: number;
+  /** 挑战模式的机器人元策略原型 id（0..CHALLENGE_ARCHETYPE_COUNT-1；人类为 undefined）。 */
+  challengeArchetypeId?: number;
   /** 本手开始时的公开行为统计快照（跨手累计）。 */
   stats?: PublicPlayerStats;
   /** 当前情绪（-2 上头 .. +2 自信，0 平稳）；只对本玩家可见。 */
@@ -184,6 +207,8 @@ export interface ActionRecord {
   potAfter: number;
   stackAfter: number;
   board: Card[];
+  /** 该动作的思考时间（毫秒；只有 UI 层传入时才有）。 */
+  thinkMs?: number;
 }
 
 /** 引擎计算出的当前玩家合法动作集合，UI 与 AI 均以此为准。 */
@@ -282,6 +307,8 @@ export interface TableConfig {
   bigBlind: number;
   seed: string;
   difficulty: Difficulty;
+  /** 挑战模式（宗师 AI：读取对手下注细节与思考时间、动态利用、强施压；默认关闭）。 */
+  challengeMode?: boolean;
   /** 人类玩家名称（默认“你”）。 */
   humanName?: string;
   /** 本地算法机器人名称（按入座顺序取用；不足时回退默认名）。 */
@@ -304,6 +331,8 @@ export interface TablePlayer {
   llmSlot?: number;
   /** 机器人风格原型 id。 */
   styleId?: number;
+  /** 挑战模式的机器人元策略原型 id。 */
+  challengeArchetypeId?: number;
   /** 跨手累计的原始统计（不直接暴露给 AI）。 */
   statsRaw?: PlayerStatsRaw;
   /** 当前情绪（-2..2），跨手更新。 */

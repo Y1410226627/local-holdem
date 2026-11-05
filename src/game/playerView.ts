@@ -34,6 +34,8 @@ export interface PublicPlayerView {
   llmSlot?: number;
   /** 机器人风格原型 id（0..5）；人类无。 */
   styleId?: number;
+  /** 挑战模式的宗师原型 id（0..4）；人类无。 */
+  challengeArchetypeId?: number;
   /** 跨手公开行为统计（只由公开动作推导）。 */
   stats?: PublicPlayerStats;
   stack: number;
@@ -93,6 +95,7 @@ export function buildPlayerView(hand: HandState, viewerId: number, seed: string)
     kind: player.kind,
     llmSlot: player.llmSlot,
     styleId: player.styleId,
+    challengeArchetypeId: player.challengeArchetypeId,
     stats: player.stats,
     stack: player.stack,
     committedThisStreet: player.committedThisStreet,

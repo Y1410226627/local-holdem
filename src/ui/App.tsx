@@ -8,6 +8,7 @@ import {
   exportHistory,
   getHumanLegalActions,
   resetChips,
+  setTableChallengeMode,
   setTableDifficulty,
   startNextHand,
 } from '../game/stateMachine';
@@ -56,6 +57,7 @@ function createBootState(): BootState {
   const base = {
     playerCount: DEFAULT_SETTINGS.playerCount,
     difficulty: DEFAULT_SETTINGS.difficulty,
+    challengeMode: DEFAULT_SETTINGS.challengeMode,
     // 种子留空 = 随机：闲置牌桌只是占位，真正开局时还会再生成一次新种子。
     seed: resolveSeed(DEFAULT_SETTINGS.seed).seed,
     smallBlind: 10,
@@ -105,10 +107,23 @@ export function App() {
   const recordIdRef = useRef(0);
   /** 已经写入过大模型对局记忆的历史手数（防重复）。 */
   const recordedHistoryRef = useRef(0);
+  /** 人类本回合开始时刻：动作时把真实思考时间传给引擎（挑战模式会读）。 */
+  const humanTurnStartedRef = useRef<number | null>(null);
 
   const humanIndex = table.players.findIndex((player) => player.isHuman);
   const legal = getHumanLegalActions(table);
   const humanStack = humanIndex >= 0 ? (table.players[humanIndex]?.stack ?? 0) : 0;
+
+  // 人类回合开始时计时（只记录真实等待时长，用于挑战模式读「犹豫」）。
+  useEffect(() => {
+    if (legal) {
+      if (humanTurnStartedRef.current === null) {
+        humanTurnStartedRef.current = performance.now();
+      }
+    } else {
+      humanTurnStartedRef.current = null;
+    }
+  }, [legal]);
 
   const showNotice = useCallback((tone: Notice['tone'], text: string) => {
     noticeIdRef.current += 1;
@@ -191,7 +206,12 @@ export function App() {
       try {
         const index = table.players.findIndex((player) => player.isHuman);
         if (index < 0) throw new Error('找不到人类玩家');
-        const next = act(table, index, action);
+        const started = humanTurnStartedRef.current;
+        const thinkMs =
+          started === null
+            ? undefined
+            : Math.max(120, Math.min(30000, Math.round(performance.now() - started)));
+        const next = act(table, index, action, thinkMs === undefined ? undefined : { thinkMs });
         epochRef.current += 1;
         setTable(next);
         setNotice(null);
@@ -210,8 +230,13 @@ export function App() {
         epochRef.current += 1;
         setTable((previous) => setTableDifficulty(previous, nextDifficulty));
       }
+      const nextChallenge: boolean | undefined = patch.challengeMode;
+      if (nextChallenge !== undefined && nextChallenge !== (table.config.challengeMode === true)) {
+        epochRef.current += 1;
+        setTable((previous) => setTableChallengeMode(previous, nextChallenge));
+      }
     },
-    [table.config.difficulty],
+    [table.config.difficulty, table.config.challengeMode],
   );
 
   /** 按当前设置创建新桌并开始第一手（大厅「开始对局」与「新局」共用）。 */
@@ -224,6 +249,7 @@ export function App() {
         createTable({
           playerCount: settings.playerCount,
           difficulty: settings.difficulty,
+          challengeMode: settings.challengeMode,
           seed: resolvedSeed.seed,
           smallBlind: 10,
           bigBlind: 20,
@@ -242,8 +268,8 @@ export function App() {
       showNotice(
         'info',
         `新牌局已开始：${settings.playerCount} 人 · 盲注 10/20 · ${
-          DIFFICULTY_LABELS[settings.difficulty]
-        }难度${llmSeats.length > 0 ? ` · ${llmSeats.length} 个大模型机器人` : ''} · ${describeSeed(
+          settings.challengeMode ? '挑战宗师' : DIFFICULTY_LABELS[settings.difficulty] + '难度'
+        }${llmSeats.length > 0 ? ` · ${llmSeats.length} 个大模型机器人` : ''} · ${describeSeed(
           resolvedSeed,
         )}。`,
       );
@@ -369,6 +395,7 @@ export function App() {
   const lobby: LobbyInfo = {
     playerCount: settings.playerCount,
     difficulty: settings.difficulty,
+    challengeMode: settings.challengeMode,
     llmCount: llmSeatConfigs.length,
     llmNames: llmSeatConfigs.map((seat) => seat.name),
   };

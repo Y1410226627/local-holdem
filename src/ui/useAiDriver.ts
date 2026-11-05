@@ -64,6 +64,8 @@ export function useAiDriver({
     const actor = hand.players[actorIndex];
     if (!actor || actor.isHuman || actor.status !== 'active') return;
 
+    const challengeMode = table.config.challengeMode === true;
+    const turnStartedAt = performance.now();
     const key = `${hand.handNo}:${hand.actionCount}:${actorIndex}`;
     const applied = appliedRef.current;
     if (applied && applied.epoch === epoch && applied.key === key) return;
@@ -161,7 +163,19 @@ export function useAiDriver({
 
         if (!decision) {
           // 大模型失败 → 回退本地算法；同一回合限制模拟次数，尽快推进。
-          decision = await decide(view, aiDifficulty, isLlm ? { maxIterations: 400 } : {});
+          // 挑战模式下本地算法（含回退）启用宗师 AI。
+          decision = await decide(view, aiDifficulty, {
+            ...(isLlm ? { maxIterations: 400 } : {}),
+            ...(challengeMode ? { challenge: true } : {}),
+          });
+        }
+
+        // 挑战模式：用「快打 / 长考」伪装节奏（只影响等待时间，不影响动作合法性）。
+        if (challengeMode && !isLlm && decision.timingHint === 'slow' && speed !== 'fast') {
+          await new Promise<void>((resolve) => {
+            window.setTimeout(resolve, Math.round(SPEED_DELAYS[speed] * 1.4));
+          });
+          if (!isCurrent() || readActingKey() !== key) return;
         }
 
         // 体验随机：本地算法玩家在开启「神态语句」时也会偶尔说一句（纯表演，不影响决策）。
@@ -178,8 +192,12 @@ export function useAiDriver({
 
         const latest = tableRef.current;
         let nextTable: TableState;
+        const thinkMs = Math.max(
+          120,
+          Math.min(30000, Math.round(performance.now() - turnStartedAt)),
+        );
         try {
-          nextTable = act(latest, actorIndex, decision.action);
+          nextTable = act(latest, actorIndex, decision.action, { thinkMs });
         } catch (actionError) {
           recover(`AI「${actor.name}」返回了非法动作（${getErrorMessage(actionError)}）`);
           return;
@@ -214,6 +232,8 @@ export function useAiDriver({
           fallbackFromLlm,
           fallbackReason,
           talk,
+          timing: decision.debug.timing,
+          archetype: decision.debug.archetype,
         });
       } catch (error) {
         if (!isCurrent()) return;

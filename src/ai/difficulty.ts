@@ -197,6 +197,50 @@ export type AiDifficulty = Difficulty;
 /** 四档基础 profile（未经训练参数覆盖，单元测试以此为基准）。 */
 export const BASE_DIFFICULTY_PROFILES: Record<Difficulty, DifficultyProfile> = DIFFICULTY_PROFILES;
 
+/** 挑战模式的中文名。 */
+export const CHALLENGE_MODE_LABEL = '挑战宗师';
+
+/**
+ * 挑战模式（宗师 / Alpha 级）基础 profile：
+ * 比专家档更重的范围建模、读下注细节与计时、EV 极化下注与强施压。
+ * 不参与四档训练（训练仍只覆盖基础四档），挑战模式在此基础值上叠加宗师原型。
+ */
+export const CHALLENGE_PROFILE: DifficultyProfile = {
+  // 复用 expert 的 key 以兼容现有 DifficultyProfile 类型；挑战模式通过 options.challenge 开启。
+  key: 'expert',
+  label: CHALLENGE_MODE_LABEL,
+  style: '挑战 · Alpha 级自适应：范围建模 + 下注 / 计时读人 + EV 极化施压',
+  preflop: {
+    positionAware: true,
+    play: 0.6,
+    raise: 0.66,
+    threeBet: 0.83,
+    openRaiseBB: 3.2,
+    threeBetMultiplier: 3.5,
+    bluffRaiseRate: 0.2,
+    mixRaiseRate: 0.36,
+    trapRate: 0.13,
+    errorRate: 0.002,
+  },
+  postflop: {
+    mcIterations: 30000,
+    bluffRate: 0.22,
+    semiBluffRate: 0.42,
+    valueThreshold: 0.58,
+    callMargin: 0.04,
+    betSizes: [0.33, 0.5, 0.66, 1, 1.35],
+    raiseSizes: [0.5, 0.75, 1, 1.35],
+    errorRate: 0.002,
+    positionAware: true,
+    yieldEvery: MC_YIELD_INTERVAL,
+  },
+};
+
+/** 挑战模式基础档位（训练参数不覆盖；宗师原型在 aiPlayer 中再叠加）。 */
+export function getChallengeProfile(): DifficultyProfile {
+  return CHALLENGE_PROFILE;
+}
+
 /**
  * 获取某难度的难度档位。
  * @param useLearned 是否叠加训练参数；默认跟随全局开关（UI 设置「使用训练后参数」）。

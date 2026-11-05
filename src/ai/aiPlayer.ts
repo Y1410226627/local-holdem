@@ -16,7 +16,28 @@
 import type { Difficulty, LegalActions, PlayerAction } from '../game/types';
 import type { PlayerView } from '../game/playerView';
 import { derivedRng } from '../game/cards';
-import { DIFFICULTY_PROFILES, getDifficultyProfile, type DifficultyProfile } from './difficulty';
+import {
+  DIFFICULTY_PROFILES,
+  getChallengeProfile,
+  getDifficultyProfile,
+  type DifficultyProfile,
+} from './difficulty';
+import {
+  applyChallengeVariant,
+  buildChallengeRanges,
+  challengeArchetype,
+  challengeArchetypeLabel,
+  challengeFoldEquity,
+  chooseChallengeSize,
+  chooseTimingHint,
+  rangesForView,
+  readBettingTells,
+  readTimingTells,
+  timingHintLabel,
+  type OpponentBettingTell,
+  type OpponentTimingTell,
+  type TimingHint,
+} from './challenge';
 import {
   applyStyleVariant,
   sampleSizeIndex,
@@ -49,6 +70,11 @@ export interface AIDecisionOptions {
   /** 测试 / 降载用：限制蒙特卡洛模拟次数（取 min(默认值, maxIterations)）。 */
   maxIterations?: number;
   /**
+   * 挑战模式（宗师 AI）：使用挑战档 profile + 宗师原型 + 读下注细节 / 思考时间。
+   * 训练 / 对照评估时忽略（profileOverride 优先）。
+   */
+  challenge?: boolean;
+  /**
    * 训练 / 回放用：强制使用指定的难度档位（不读取全局难度配置与训练覆盖）。
    * 自博弈训练脚本用它评估候选参数。
    */
@@ -77,10 +103,16 @@ export interface AIDebugInfo {
   latencyMs?: number;
   /** 大模型原始响应（截断，用于调试）。 */
   rawResponse?: string;
+  /** 挑战模式的计时伪装策略（调试用）。 */
+  timing?: string;
+  /** 挑战模式的宗师原型名称。 */
+  archetype?: string;
 }
 
 export interface AIDecision {
   action: PlayerAction;
+  /** 挑战模式：建议 UI 用的思考时间伪装（fast / normal / slow）。 */
+  timingHint?: TimingHint;
   debug: AIDebugInfo;
 }
 
@@ -95,6 +127,14 @@ interface DecisionContext {
   mood: number;
   /** 跨手对手公开统计汇总（困难 / 专家据此调整策略）。 */
   opponents: OpponentSummary;
+  /** 挑战模式（宗师 AI）。 */
+  challenge: boolean;
+  /** 挑战模式的宗师原型 id。 */
+  archetypeId?: number;
+  /** 当前手读到的对手思考时间（挑战模式）。 */
+  timingTells: OpponentTimingTell[];
+  /** 当前手读到的对手下注细节（挑战模式）。 */
+  bettingTells: OpponentBettingTell[];
   /** 风格原型 id（体验随机层；undefined 时不施加风格）。 */
   styleId?: number;
 }
@@ -225,6 +265,10 @@ function pickBetFraction(
   return pickSize(rng, fractions, ctx.styleId);
 }
 
+function isAggressiveActionType(type: PlayerAction['type']): boolean {
+  return type === 'bet' || type === 'raise' || type === 'allin';
+}
+
 function countOpponents(view: PlayerView): number {
   return view.players.filter(
     (player) =>
@@ -317,7 +361,7 @@ function decidePreflop(
           ),
         };
 
-  if (difficulty === 'beginner') {
+  if (difficulty === 'beginner' && !ctx.challenge) {
     // 入门 AI：完全按起手牌强度查表，不看位置；只小额跟注，极少加注。
     const playable = strength >= profile.preflop.play;
     const premium = strength >= 0.95;
@@ -409,8 +453,9 @@ function decidePreflop(
         : action.type === 'check'
           ? '过牌'
           : '弃牌';
-  const reasonTag =
-    difficulty === 'expert'
+  const reasonTag = ctx.challenge
+    ? '挑战宗师：位置 / 范围 / 读人后决策'
+    : difficulty === 'expert'
       ? '专家风格：位置与对手行动倾向加权'
       : difficulty === 'hard'
         ? '困难风格：位置范围表 + 混合频率'
@@ -740,6 +785,195 @@ function decideExpertPostflop(
 }
 
 /* ------------------------------------------------------------------ */
+/* 挑战模式：读下注 / 计时 + 范围建模 + EV 极化施压                     */
+/* ------------------------------------------------------------------ */
+
+/** 汇总当前手的「对手偏弱」信号（快速过牌 / 小注封锁等公开信息）。 */
+function opponentWeakSignals(ctx: DecisionContext): { weak: boolean; note: string } {
+  const timingWeak = ctx.timingTells.find(
+    (tell) => tell.tell === 'fast' && tell.context === 'passive' && tell.confidence >= 0.45,
+  );
+  const bettingWeak = ctx.bettingTells.find(
+    (tell) => tell.smallBetRate >= 0.55 && tell.bigBetRate === 0 && tell.aggressiveActions >= 1,
+  );
+  const parts: string[] = [];
+  if (timingWeak) parts.push(`${timingWeak.playerName} 快速过牌 / 跟注（偏弱）`);
+  if (bettingWeak) parts.push(`${bettingWeak.playerName} 小注偏多（偏弱 / 封锁）`);
+  return { weak: parts.length > 0, note: parts.join('；') };
+}
+
+function decideChallengePostflop(
+  ctx: DecisionContext,
+  analysis: PostflopAnalysis,
+  equity: number,
+  iterations: number,
+): PostflopResult {
+  const { view, legal, profile, rng, opponents } = ctx;
+  const archetype = challengeArchetype(ctx.archetypeId);
+  const post = profile.postflop;
+  const spr = view.self.stack / Math.max(1, view.pot);
+  const inPosition = positionOf(view) === 'late';
+  const opponentCount = countOpponents(view);
+  const weakSignals = opponentWeakSignals(ctx);
+
+  // 读最后一条主动动作的计时：长考后下注 → 两极，多抓诈；秒打 → 偏价值，收紧跟注。
+  const lastAggressive = [...view.actions]
+    .reverse()
+    .find((record) => isAggressiveActionType(record.action.type));
+  const aggressorTiming = lastAggressive
+    ? ctx.timingTells.find((tell) => tell.playerId === lastAggressive.actorId)
+    : undefined;
+  let required = ctx.potOdds + post.callMargin;
+  if (aggressorTiming && aggressorTiming.confidence >= 0.4) {
+    if (aggressorTiming.tell === 'slow' && aggressorTiming.context === 'aggressive') {
+      required -= 0.03 * aggressorTiming.confidence;
+    } else if (aggressorTiming.tell === 'fast' && aggressorTiming.context === 'aggressive') {
+      required += 0.025 * aggressorTiming.confidence;
+    }
+  }
+  required = Math.max(0.05, Math.min(0.9, required));
+
+  // 对手越爱跟注 → 价值线越薄；越紧 → 越标准。
+  const valueThreshold = Math.max(
+    0.5,
+    Math.min(0.92, post.valueThreshold + (opponents.avgVpip !== null && opponents.avgVpip > 0.55 ? -0.04 : 0)),
+  );
+  const foldEquity = challengeFoldEquity(opponents, opponentCount, 0.75, aggressorTiming?.tell);
+  const semi =
+    analysis.draw.hasDraw &&
+    equity >= 0.25 &&
+    rng() < post.semiBluffRate * (0.85 + archetype.aggression * 0.2);
+  const bluffChance = Math.min(
+    0.6,
+    post.bluffRate *
+      archetype.aggression *
+      (weakSignals.weak ? 1.5 : 1) *
+      (foldEquity >= 0.5 ? 1.2 : 0.85),
+  );
+  const pureBluff =
+    rng() < bluffChance &&
+    opponentCount >= 1 &&
+    (inPosition || opponentCount <= 2 || weakSignals.weak);
+  const monster = equity >= 0.85;
+  const strong = equity >= valueThreshold;
+  const trapSlowplay =
+    strong && rng() < profile.preflop.trapRate * archetype.trap * (view.street === 'flop' ? 0.8 : 0.45);
+
+  const sizeChoice = (raise: boolean, isBluff: boolean) =>
+    chooseChallengeSize({
+      fractions: raise ? post.raiseSizes : post.betSizes,
+      pot: view.pot,
+      equity,
+      currentBet: legal.currentBet,
+      callAmount: legal.callAmount,
+      legal,
+      foldToBetRate: opponents.avgFoldToBet,
+      opponentCount,
+      street: view.street,
+      archetypeId: ctx.archetypeId,
+      isBluff,
+    });
+
+  let action: PlayerAction;
+  let note: string;
+
+  if (legal.canCheck) {
+    const valueFraction = sizeChoice(false, false).fraction;
+    const bluffFraction = sizeChoice(false, true).fraction;
+    const valueBet = buildAggressive(legal, targetFromFraction(view, legal, valueFraction));
+    const bluffBet = buildAggressive(legal, targetFromFraction(view, legal, bluffFraction));
+    if (trapSlowplay) {
+      action = { type: 'check' };
+      note = '陷阱：强牌慢玩，诱导下一条街';
+    } else if (valueBet && (strong ? rng() < 0.82 : false)) {
+      if (monster && spr <= 2.2 && legal.canAllIn) {
+        action = { type: 'allin' };
+        note = '低 SPR + 极高胜率：直接全下施压';
+      } else {
+        action = valueBet;
+        note = sizeChoice(false, false).note + '价值下注';
+      }
+    } else if (bluffBet && semi && rng() < 0.75) {
+      action = bluffBet;
+      note = '听牌半诈唬：胜率 + 弃牌率';
+    } else if (bluffBet && pureBluff) {
+      action = bluffBet;
+      note =
+        '读弱点强施压 / 纯诈唬' +
+        (weakSignals.note ? '（' + weakSignals.note + '）' : '（范围劣势下抢池）');
+    } else {
+      action = { type: 'check' };
+      note = '过牌控池，保留摊牌价值';
+    }
+  } else {
+    const valueRaiseTarget = sizeChoice(true, false).fraction;
+    const bluffRaiseTarget = sizeChoice(true, true).fraction;
+    const valueRaise = buildAggressive(legal, targetFromFraction(view, legal, valueRaiseTarget));
+    const bluffRaise = buildAggressive(legal, targetFromFraction(view, legal, bluffRaiseTarget));
+    if (monster || (spr <= 2 && equity >= 0.66)) {
+      if (legal.canAllIn && (spr <= 3 || equity >= 0.9)) {
+        action = { type: 'allin' };
+        note = '低 SPR + 强牌：全下最大化价值';
+      } else if (valueRaise) {
+        action = valueRaise;
+        note = '强牌加注，做大底池';
+      } else {
+        action = { type: 'call' };
+        note = '强牌无法加注，跟注';
+      }
+    } else if (strong && valueRaise && rng() < 0.55) {
+      action = valueRaise;
+      note = '价值加注，做大底池';
+    } else if (equity >= required) {
+      if (
+        aggressorTiming?.tell === 'slow' &&
+        aggressorTiming.context === 'aggressive' &&
+        valueRaise &&
+        rng() < 0.35
+      ) {
+        action = valueRaise;
+        note = '读长考：对手偏两极，选择加注反制';
+      } else {
+        action = { type: 'call' };
+        note = '胜率高于必要线，跟注';
+      }
+    } else if (semi && foldEquity >= 0.42 && bluffRaise) {
+      action = bluffRaise;
+      note = '半诈唬加注，利用弃牌率';
+    } else if (pureBluff && foldEquity >= 0.55 && bluffRaise && rng() < 0.6) {
+      action = bluffRaise;
+      note = '读弱点强力诈唬加注';
+    } else if (equity >= required - 0.08 && weakSignals.weak && rng() < 0.5) {
+      action = { type: 'call' };
+      note = '抓诈：读对手弱信号跟注';
+    } else {
+      action = { type: 'fold' };
+      note = '胜率低于安全线，弃牌';
+    }
+  }
+
+  const timingText =
+    ctx.timingTells.length > 0
+      ? ctx.timingTells
+          .slice(0, 2)
+          .map((tell) => tell.playerName + '：' + tell.note)
+          .join('；')
+      : '无计时样本';
+  const bettingText =
+    ctx.bettingTells.length > 0
+      ? ctx.bettingTells
+          .slice(0, 2)
+          .map((tell) => tell.playerName + '：' + tell.note)
+          .join('；')
+      : '无尺度样本';
+  const reasoning =
+    `挑战（${archetype.label}）：${analysis.categoryName}，范围建模 + 读人后 MC ${iterations} 次胜率 ` +
+    `${(equity * 100).toFixed(1)}%，必要胜率 ${(required * 100).toFixed(1)}%，SPR ${spr.toFixed(2)}；` +
+    `读计时：${timingText}；读尺度：${bettingText}；${note}。`;
+  return { action, reasoning };
+}
+
+/* ------------------------------------------------------------------ */
 /* expert：基于行动历史的简化范围收窄                                  */
 /* ------------------------------------------------------------------ */
 
@@ -974,7 +1208,10 @@ export async function decide(
   const legal = view.legal;
   if (!legal) throw new Error('当前不是该玩家的行动回合');
 
-  const baseProfile = options.profileOverride ?? getDifficultyProfile(difficulty);
+  // 挑战模式：训练 / 对照评估（profileOverride）时关闭，保证训练语义不变。
+  const challenge = options.challenge === true && !options.profileOverride;
+  const baseProfile =
+    options.profileOverride ?? (challenge ? getChallengeProfile() : getDifficultyProfile(difficulty));
   const styleId = view.self.styleId;
   const mood = options.profileOverride ? 0 : (view.self.mood ?? 0);
   const opponents = summarizeOpponents(view);
@@ -983,11 +1220,22 @@ export async function decide(
     ? baseProfile
     : applyStyleVariant(baseProfile, styleId);
   if (!options.profileOverride) {
-    profile = applyMoodToProfile(profile, mood, difficulty);
-    profile = applyExploitation(profile, opponents, difficulty);
+    const layerDifficulty: Difficulty = challenge ? 'expert' : difficulty;
+    profile = applyMoodToProfile(profile, mood, layerDifficulty);
+    profile = applyExploitation(profile, opponents, layerDifficulty);
+    if (challenge) profile = applyChallengeVariant(profile, view.self.challengeArchetypeId);
   }
-  const rng = derivedRng(view.seed, difficulty, view.actions.length, styleId ?? 0);
+  const rng = derivedRng(
+    view.seed,
+    difficulty,
+    view.actions.length,
+    styleId ?? 0,
+    challenge ? 1 : 0,
+  );
   const potOdds = potOddsOf(view, legal);
+  const archetypeId = challenge ? view.self.challengeArchetypeId : undefined;
+  const timingTells = challenge ? readTimingTells(view) : [];
+  const bettingTells = challenge ? readBettingTells(view) : [];
   const ctx: DecisionContext = {
     view,
     legal,
@@ -997,6 +1245,10 @@ export async function decide(
     potOdds,
     mood,
     opponents,
+    challenge,
+    archetypeId,
+    timingTells,
+    bettingTells,
     styleId: options.profileOverride ? undefined : styleId,
   };
 
@@ -1014,7 +1266,9 @@ export async function decide(
     const key = handKey(view.self.holeCards);
     const result = decidePreflop(ctx, strength, key);
     action = result.action;
-    reasoning = result.reasoning;
+    reasoning = challenge
+      ? '挑战（' + challengeArchetypeLabel(archetypeId) + '）：' + result.reasoning
+      : result.reasoning;
     handCategory = `起手牌 ${key}`;
   } else {
     const analysis = analyzePostflop(view.self.holeCards, view.board);
@@ -1023,7 +1277,21 @@ export async function decide(
     analysisHasDraw = analysis.draw.hasDraw;
 
     let result: PostflopResult;
-    if (difficulty === 'beginner') {
+    if (challenge) {
+      const rounds = resolveIterations(profile, options);
+      const rangeModel = buildChallengeRanges(view, timingTells, bettingTells);
+      const ranges = rounds > 0 ? rangesForView(view, rangeModel) : [];
+      const equityResult = await estimateEquity(
+        view,
+        rounds,
+        rng,
+        rounds > 0 ? { ranges, maxRangeAttempts: 10 } : undefined,
+      );
+      equity = equityResult.equity;
+      iterations = equityResult.iterations;
+      variationReference = equity;
+      result = decideChallengePostflop(ctx, analysis, equity, iterations);
+    } else if (difficulty === 'beginner') {
       result = decideBeginnerPostflop(ctx, analysis);
     } else if (difficulty === 'normal') {
       result = decideNormalPostflop(ctx, analysis);
@@ -1055,8 +1323,8 @@ export async function decide(
     reasoning = result.reasoning;
   }
 
-  // 体验随机：风格触发的合法小幅变化（尺度 / 慢玩 / 边缘牌随机化）。
-  if (!isPreflop) {
+  // 体验随机：风格触发的合法小幅变化（尺度 / 慢玩 / 边缘牌随机化）；挑战模式用自身随机化。
+  if (!isPreflop && !challenge) {
     const varied = maybeStyleVariation(ctx, action, variationReference);
     if (varied) {
       action = varied.action;
@@ -1064,8 +1332,8 @@ export async function decide(
     }
   }
 
-  // 真人化失误层：低概率的人类式偏差（入门 > 普通 > 困难 > 专家）；训练 / 对照评估时关闭。
-  if (!isPreflop && !options.profileOverride) {
+  // 真人化失误层：低概率的人类式偏差（入门 > 普通 > 困难 > 专家）；训练 / 对照评估时关闭；挑战模式不犯错。
+  if (!isPreflop && !options.profileOverride && !challenge) {
     const mistake = maybeHumanMistake(ctx, action, variationReference, analysisHasDraw);
     if (mistake) {
       action = mistake.action;
@@ -1080,13 +1348,29 @@ export async function decide(
   const styleName = options.profileOverride ? null : styleLabel(styleId);
   const tags: string[] = [];
   if (styleName) tags.push(styleName + '型');
+  if (challenge) tags.push(challengeArchetypeLabel(archetypeId));
   const moodTag = options.profileOverride ? null : moodLabel(mood);
   if (moodTag) tags.push(moodTag);
   if (!options.profileOverride && opponents.count > 0 && difficulty !== 'beginner') {
     tags.push('读对手');
   }
+  const timingHint =
+    challenge && !options.profileOverride
+      ? chooseTimingHint({
+          view,
+          action: safeAction,
+          strength: variationReference ?? 0.5,
+          isBluff:
+            isAggressiveActionType(safeAction.type) && (variationReference ?? 1) < 0.42,
+          archetypeId,
+          rng,
+        })
+      : undefined;
+  const timingText = timingHint ? timingHintLabel(timingHint) : null;
+  if (timingText) reasoning = reasoning + '（计时伪装：' + timingText + '）';
   return {
     action: safeAction,
+    timingHint,
     debug: {
       difficulty,
       profile: tags.length > 0 ? profile.style + ' · ' + tags.join(' · ') : profile.style,
@@ -1095,6 +1379,8 @@ export async function decide(
       handCategory,
       iterations,
       reasoning,
+      timing: timingText ?? undefined,
+      archetype: challenge ? challengeArchetypeLabel(archetypeId) : undefined,
     },
   };
 }

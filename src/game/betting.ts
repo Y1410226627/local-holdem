@@ -9,7 +9,7 @@
  * - 多个 short all-in 累计达到一次完整加注额时，重开已行动玩家的加注权（TDA 累积规则）。
  * - 大盲 option：翻牌前无人加注时，大盲可过牌或加注（由 hasActedThisStreet 自然支持）。
  */
-import type { HandState, LegalActions, PlayerAction, PlayerState } from './types';
+import type { ActionMeta, HandState, LegalActions, PlayerAction, PlayerState } from './types';
 import { addLog } from './log';
 
 export class IllegalActionError extends Error {
@@ -193,7 +193,12 @@ function applyAggression({ hand, player, playerIndex, target, previousBet }: Agg
 }
 
 /** 执行动作（原地修改传入的 hand，调用方负责克隆）。 */
-function applyActionMutable(hand: HandState, playerIndex: number, action: PlayerAction): void {
+function applyActionMutable(
+  hand: HandState,
+  playerIndex: number,
+  action: PlayerAction,
+  meta?: ActionMeta,
+): void {
   const legal = validateAction(hand, playerIndex, action);
   const player = hand.players[playerIndex];
   const previousBet = hand.currentBet;
@@ -270,6 +275,9 @@ function applyActionMutable(hand: HandState, playerIndex: number, action: Player
     potAfter: hand.pot,
     stackAfter: player.stack,
     board: hand.board.slice(),
+    ...(meta?.thinkMs && meta.thinkMs > 0
+      ? { thinkMs: Math.min(30000, Math.round(meta.thinkMs)) }
+      : {}),
   });
 }
 
@@ -281,9 +289,10 @@ export function applyPlayerAction(
   hand: HandState,
   playerIndex: number,
   action: PlayerAction,
+  meta?: ActionMeta,
 ): HandState {
   const next = cloneHand(hand);
-  applyActionMutable(next, playerIndex, action);
+  applyActionMutable(next, playerIndex, action, meta);
   return next;
 }
 

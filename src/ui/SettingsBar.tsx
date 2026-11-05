@@ -69,6 +69,18 @@ export function SettingsBar({
           </select>
         </label>
 
+        <label
+          className="toggle toggle--challenge"
+          title="挑战宗师：本地算法机器人读取你的下注细节与思考时间、动态利用，并用节奏伪装和极化下注施压（仅本地算法机器人；大模型玩家按原设置）"
+        >
+          <input
+            type="checkbox"
+            checked={settings.challengeMode}
+            onChange={(event) => onChange({ challengeMode: event.target.checked })}
+          />
+          <span>挑战宗师</span>
+        </label>
+
         <label className="field">
           <span className="field__label">人数</span>
           <select
@@ -154,7 +166,7 @@ export function SettingsBar({
         )}
 
         <span className="settings-hint">
-          种子留空 = 每局自动随机（牌不会重复）；填写固定值可复现。人数与种子在点「新局」后生效；难度即时生效。
+          种子留空 = 每局自动随机（牌不会重复）；填写固定值可复现。人数与种子在点「新局」后生效；难度与挑战宗师即时生效。
           <span className="settings-hint__seed" aria-label="本局实际种子">
             {table.phase === 'idle'
               ? '点「开始对局」时生成实际种子'

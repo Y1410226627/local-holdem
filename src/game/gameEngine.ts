@@ -7,6 +7,7 @@
  * - 完整中文日志写入 hand.log；摊牌前日志绝不包含对手底牌。
  */
 import type {
+  ActionMeta,
   ActionType,
   PublicPlayerStats,
   Card,
@@ -47,6 +48,7 @@ export interface CreateHandPlayerInput {
   kind?: PlayerKind;
   llmSlot?: number;
   styleId?: number;
+  challengeArchetypeId?: number;
   stats?: PublicPlayerStats;
   mood?: number;
 }
@@ -453,6 +455,7 @@ export function createHand(options: CreateHandOptions): HandState {
     kind: input.kind,
     llmSlot: input.llmSlot,
     styleId: input.styleId,
+    challengeArchetypeId: input.challengeArchetypeId,
     stats: input.stats,
     mood: input.mood,
     stack: input.stack,
@@ -552,11 +555,12 @@ export function playAction(
   hand: HandState,
   playerIndex: number,
   action: PlayerAction,
+  meta?: ActionMeta,
 ): HandState {
   if (hand.phase !== 'playing') {
     throw new IllegalActionError('本手牌已经结束');
   }
-  const next = applyPlayerAction(hand, playerIndex, action);
+  const next = applyPlayerAction(hand, playerIndex, action, meta);
   next.actingIndex = findNextToAct(next, playerIndex);
   settleState(next);
   return next;

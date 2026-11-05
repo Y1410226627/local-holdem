@@ -2,6 +2,7 @@
  * 会话状态机：管理一桌多手牌（筹码持久化、按钮轮转、难度、历史记录、重开）。
  */
 import type {
+  ActionMeta,
   Difficulty,
   HandHistory,
   LegalActions,
@@ -19,6 +20,7 @@ import {
   type PublicPlayerStats,
 } from './types';
 import { assignBotStyleIds } from './cards';
+import { assignChallengeArchetypes } from '../ai/challenge';
 import { IllegalActionError, createHand, getLegalActions, playAction } from './gameEngine';
 
 export const BOT_NAMES = ['阿豪', '小雅', '老陈', '莉莉', '大鹏'];
@@ -38,12 +40,31 @@ export function createEmptyStatsRaw(): PlayerStatsRaw {
     facedBet: 0,
     foldedToBet: 0,
     netChips: 0,
+    thinkSamples: 0,
+    thinkMsTotal: 0,
+    aggressiveThinkSamples: 0,
+    aggressiveThinkMsTotal: 0,
+    passiveThinkSamples: 0,
+    passiveThinkMsTotal: 0,
   };
 }
 
 /** 原始统计 → 公开统计（样本不足时返回 undefined）。 */
 export function toPublicStats(raw: PlayerStatsRaw | undefined): PublicPlayerStats | undefined {
   if (!raw || raw.hands <= 0) return undefined;
+  const timing: Pick<
+    PublicPlayerStats,
+    'avgThinkMs' | 'aggressiveAvgThinkMs' | 'passiveAvgThinkMs'
+  > = {};
+  if (raw.thinkSamples >= 2) timing.avgThinkMs = Math.round(raw.thinkMsTotal / raw.thinkSamples);
+  if (raw.aggressiveThinkSamples >= 2) {
+    timing.aggressiveAvgThinkMs = Math.round(
+      raw.aggressiveThinkMsTotal / raw.aggressiveThinkSamples,
+    );
+  }
+  if (raw.passiveThinkSamples >= 2) {
+    timing.passiveAvgThinkMs = Math.round(raw.passiveThinkMsTotal / raw.passiveThinkSamples);
+  }
   return {
     hands: raw.hands,
     vpipRate: raw.vpip / raw.hands,
@@ -51,6 +72,7 @@ export function toPublicStats(raw: PlayerStatsRaw | undefined): PublicPlayerStat
     aggression: Math.min(5, (raw.bets + raw.raises) / Math.max(1, raw.calls)),
     foldToBetRate: raw.facedBet > 0 ? raw.foldedToBet / raw.facedBet : null,
     netChips: raw.netChips,
+    ...timing,
   };
 }
 
@@ -93,6 +115,20 @@ function updateSessionStats(table: TableState): void {
     else if (action.type === 'raise') raw.raises += 1;
     else if (action.type === 'call') raw.calls += 1;
     else if (action.type === 'fold') raw.folds += 1;
+
+    // 思考时间统计：挑战模式用于读「快 / 慢」计时漏洞。
+    if (typeof record.thinkMs === 'number' && record.thinkMs > 0) {
+      const thinkMs = Math.min(30000, Math.round(record.thinkMs));
+      raw.thinkSamples += 1;
+      raw.thinkMsTotal += thinkMs;
+      if (action.type === 'bet' || action.type === 'raise' || action.type === 'allin') {
+        raw.aggressiveThinkSamples += 1;
+        raw.aggressiveThinkMsTotal += thinkMs;
+      } else if (action.type === 'call' || action.type === 'check') {
+        raw.passiveThinkSamples += 1;
+        raw.passiveThinkMsTotal += thinkMs;
+      }
+    }
 
     const facing = streetBet > 0 && (action.type === 'fold' || action.type === 'call' || action.type === 'raise' || action.type === 'allin');
     if (facing) {
@@ -226,8 +262,16 @@ export function createTable(overrides: Partial<TableConfig> = {}): TableState {
     config.seed,
     players.filter((player) => !player.isHuman).map((player) => player.id),
   );
+  // 挑战模式的宗师原型：同样由 seed 打乱，保证同桌「和而不同」。
+  const challengeArchetypeIds = assignChallengeArchetypes(
+    config.seed,
+    players.filter((player) => !player.isHuman).map((player) => player.id),
+  );
   for (const player of players) {
-    if (!player.isHuman) player.styleId = styleIds.get(player.id);
+    if (!player.isHuman) {
+      player.styleId = styleIds.get(player.id);
+      player.challengeArchetypeId = challengeArchetypeIds.get(player.id);
+    }
     player.statsRaw = createEmptyStatsRaw();
     player.mood = 0;
   }
@@ -348,6 +392,7 @@ export function startNextHand(table: TableState): TableState {
       kind: player.kind,
       llmSlot: player.llmSlot,
       styleId: player.styleId,
+      challengeArchetypeId: player.challengeArchetypeId,
       stats: toPublicStats(player.statsRaw),
       mood: player.mood,
     })),
@@ -369,12 +414,17 @@ export function startNextHand(table: TableState): TableState {
 }
 
 /** 执行一个玩家动作（playerIndex 必须等于当前行动玩家）。 */
-export function act(table: TableState, playerIndex: number, action: PlayerAction): TableState {
+export function act(
+  table: TableState,
+  playerIndex: number,
+  action: PlayerAction,
+  meta?: ActionMeta,
+): TableState {
   if (table.phase !== 'playing' || !table.hand) {
     throw new IllegalActionError('当前不在牌局进行中');
   }
   const previousLogLength = table.hand.log.length;
-  const newHand = playAction(table.hand, playerIndex, action);
+  const newHand = playAction(table.hand, playerIndex, action, meta);
   const next = structuredClone(table);
   next.hand = newHand;
   syncHand(next, previousLogLength);
@@ -412,6 +462,13 @@ export function setTableDifficulty(table: TableState, difficulty: Difficulty): T
   return next;
 }
 
+/** 开关挑战模式（立即对下一动作生效；训练 / 大模型玩家不受影响）。 */
+export function setTableChallengeMode(table: TableState, enabled: boolean): TableState {
+  const next = structuredClone(table);
+  next.config.challengeMode = enabled;
+  return next;
+}
+
 /** resetChips 的可选参数。 */
 export interface ResetChipsOptions {
   /** 重置后换用的新种子；不传则沿用原牌桌种子（固定种子模式可复现）。 */
@@ -433,17 +490,19 @@ export function resetChips(table: TableState, options: ResetChipsOptions = {}): 
     kind: player.kind,
     llmSlot: player.llmSlot,
     styleId: player.styleId,
+    challengeArchetypeId: player.challengeArchetypeId,
     statsRaw: createEmptyStatsRaw(),
     mood: 0,
   }));
   // 注入新种子 = 新牌局：重新打乱风格分配，让每个新局的对手“性格组合”不同。
   if (injectedSeed) {
-    const styleIds = assignBotStyleIds(
-      config.seed,
-      next.players.filter((player) => !player.isHuman).map((player) => player.id),
-    );
+    const botIds = next.players.filter((player) => !player.isHuman).map((player) => player.id);
+    const styleIds = assignBotStyleIds(config.seed, botIds);
+    const challengeArchetypeIds = assignChallengeArchetypes(config.seed, botIds);
     for (const player of next.players) {
-      if (!player.isHuman) player.styleId = styleIds.get(player.id);
+      if (player.isHuman) continue;
+      player.styleId = styleIds.get(player.id);
+      player.challengeArchetypeId = challengeArchetypeIds.get(player.id);
     }
   }
   next.buttonIndex = config.playerCount - 1;

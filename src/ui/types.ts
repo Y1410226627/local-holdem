@@ -26,12 +26,16 @@ export interface GameSettings {
   seed: string;
   speed: AiSpeed;
   debugMode: boolean;
+  /** 挑战模式（宗师 AI）：本地算法机器人读取下注细节 / 思考时间并强施压。 */
+  challengeMode: boolean;
 }
 
 /** 大厅（phase === 'idle'）展示的当前待开局配置。 */
 export interface LobbyInfo {
   playerCount: number;
   difficulty: Difficulty;
+  /** 是否开启挑战宗师模式。 */
+  challengeMode: boolean;
   /** 已启用的大模型机器人数量。 */
   llmCount: number;
   /** 已启用的大模型显示名称。 */
@@ -44,6 +48,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   seed: '',
   speed: 'normal',
   debugMode: false,
+  challengeMode: false,
 };
 
 /** 调试面板中的一条 AI 决策记录。 */
@@ -74,6 +79,10 @@ export interface AiDebugRecord {
   fallbackReason?: string;
   /** 大模型玩家输出的神态/语句（开启「神态语句」时）。 */
   talk?: string;
+  /** 挑战模式：计时伪装（秒打 / 长考 / 正常节奏）。 */
+  timing?: string;
+  /** 挑战模式：宗师原型名称。 */
+  archetype?: string;
 }
 
 /** 页面顶部的提示（错误 / 信息）。 */
