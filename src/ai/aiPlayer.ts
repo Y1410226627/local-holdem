@@ -94,6 +94,21 @@ import {
  */
 const ENABLE_RIVER_SOLVER = false;
 
+/**
+ * 单挑挑战档 SB（按钮）翻前参数。
+ *
+ * 为什么不用离线蓝图：蓝图叶节点按「胜率 × 底池」估收益，等价于假设后续街全部过牌，
+ * 会系统性高估有位置的 SB，导致 SB 弱牌 99% 跛入（v0.15.0 实测）。
+ * 翻前解只与「它假设的翻后打法」一致；我们的翻后是启发式，所以这里按实际引擎配对实测调参。
+ */
+const HU_SB_PREFLOP = {
+  play: 0.35,
+  raise: 0.45,
+  threeBet: 0.75,
+  bluffRaiseRate: 0.12,
+  mixRaiseRate: 0.3,
+};
+
 export interface AIDecisionOptions {
   /** 测试 / 降载用：限制蒙特卡洛模拟次数（取 min(默认值, maxIterations)）。 */
   maxIterations?: number;
@@ -108,6 +123,8 @@ export interface AIDecisionOptions {
   blueprint?: boolean;
   /** 单挑 SB 是否放宽开池（基准消融用；默认 true）。 */
   sbWide?: boolean;
+  /** 单挑 SB 翻前参数覆盖（基准消融用；默认 HU_SB_PREFLOP）。 */
+  sbPreflop?: Partial<typeof HU_SB_PREFLOP>;
   /** 关闭随机失误层（挑战专家基准用）。 */
   noMistakes?: boolean;
   /**
@@ -1401,14 +1418,7 @@ async function decideCore(
           ...ctx,
           profile: {
             ...profile,
-            preflop: {
-              ...profile.preflop,
-              play: 0.35,
-              raise: 0.45,
-              threeBet: 0.75,
-              bluffRaiseRate: 0.12,
-              mixRaiseRate: 0.3,
-            },
+            preflop: { ...profile.preflop, ...HU_SB_PREFLOP, ...options.sbPreflop },
           },
         }
       : ctx;
