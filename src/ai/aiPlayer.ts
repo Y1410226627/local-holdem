@@ -26,6 +26,7 @@ import { gtoBoundaryAdjust, gtoClosenessFor, gtoEvSizeChoice } from './gto';
 import { gtoPushFoldAdvice } from './gtoAdvice';
 import { depthLimitedSearch, estimateActionEv } from './search';
 import { solveStreetSubgame } from './solver/subgame';
+import { solveTurnRiver } from './solver/subgameTurn';
 import { buildBlueprintRangeWeights, preflopActionOf, preflopAdvice } from './solver/preflop';
 
 import './solver/blueprint';
@@ -95,6 +96,17 @@ import {
 const ENABLE_RIVER_SOLVER = false;
 
 /**
+ * 转牌 + 河牌**联合**求解开关。
+ *
+ * 与河牌单街求解的区别：转牌单街树的叶子会把「check-check」当成立即摊牌，
+ * 但真实游戏后面还有河牌。联合求解一直展开到摊牌，终点就是真实收益，
+ * 因此**不需要价值函数**——这是深度受限求解里唯一不需要神经网络的情形。
+ *
+ * 实测：24 手 / 4 个河牌桶 / 200 次迭代，面对下注约 120–170ms，无人下注约 350ms。
+ */
+const ENABLE_TURN_RIVER_SOLVER = true;
+
+/**
  * 单挑挑战档 SB（按钮）翻前参数。
  *
  * 为什么不用离线蓝图：蓝图叶节点按「胜率 × 底池」估收益，等价于假设后续街全部过牌，
@@ -117,8 +129,10 @@ export interface AIDecisionOptions {
    * 训练 / 对照评估时忽略（profileOverride 优先）。
    */
   challenge?: boolean;
-  /** 子博弈求解器参数（基准 / 低配设备降载用；默认 100 次迭代 / 80 组合）。 */
+  /** 子博弈求解器参数（基准 / 低配设备降载用）。 */
   solver?: { iterations?: number; maxCombos?: number; enabled?: boolean };
+  /** 转+河联合求解参数（基准 / 低配设备降载用）。 */
+  turnRiver?: { iterations?: number; maxCombos?: number; riverBuckets?: number; timeBudgetMs?: number; enabled?: boolean };
   /** 是否使用翻前蓝图（基准消融用；默认 true）。 */
   blueprint?: boolean;
   /** 单挑 SB 是否也用蓝图（基准消融用；默认 true）。 */
@@ -155,7 +169,7 @@ export interface AIDebugInfo {
   /** 决策来源：本地算法 / 本地大模型。 */
   source?: 'local' | 'llm';
   /** 本地算法的具体引擎：CFR 子博弈 / 翻前蓝图 / 多人挑战 / 启发式。 */
-  engine?: 'cfr-subgame' | 'preflop-blueprint' | 'challenge-multiway' | 'heuristic';
+  engine?: 'cfr-subgame' | 'cfr-turn-river' | 'preflop-blueprint' | 'challenge-multiway' | 'heuristic';
   /** 大模型名称（source === 'llm' 时）。 */
   model?: string;
   /** 大模型调用耗时（毫秒）。 */
@@ -1402,7 +1416,7 @@ async function decideCore(
   let variationReference: number | undefined;
   let analysisHasDraw = false;
   let solvedByCfr = false;
-  let decisionSource: 'cfr-subgame' | 'preflop-blueprint' | 'challenge-multiway' | 'heuristic' = 'heuristic';
+  let decisionSource: 'cfr-subgame' | 'cfr-turn-river' | 'preflop-blueprint' | 'challenge-multiway' | 'heuristic' = 'heuristic';
 
   const isPreflop = view.street === 'preflop' || view.board.length < 3;
   if (isPreflop) {
@@ -1492,6 +1506,32 @@ async function decideCore(
       const rounds = resolveIterations(profile, options);
       // 单挑河牌：真实子博弈 CFR+（range-vs-hand），替代单步 EV 搜索。
       // 多人底池不套单挑解，继续走挑战启发式 + 多人谨慎。
+      // 单挑转牌：转+河联合 CFR+（精确，不依赖价值函数）。
+      if (
+        ENABLE_TURN_RIVER_SOLVER &&
+        activeOpponents === 1 &&
+        view.street === 'turn' &&
+        options.turnRiver?.enabled !== false
+      ) {
+        const solved = solveTurnRiver(view, {
+          iterations: options.turnRiver?.iterations ?? 160,
+          maxCombos: options.turnRiver?.maxCombos ?? 20,
+          riverBuckets: options.turnRiver?.riverBuckets ?? 3,
+          // 默认不设时间预算：时间预算会让迭代数随机器负载变化，导致同一局面决策不确定，
+          // 基准无法复现。固定迭代数（160）在本机中位 181ms，已可接受。
+          timeBudgetMs: options.turnRiver?.timeBudgetMs ?? 0,
+        });
+        if (solved) {
+          solvedByCfr = true;
+          decisionSource = 'cfr-turn-river';
+          result = {
+            action: solved.action,
+            reasoning:
+              `挑战（转+河联合 CFR+）：${solved.actionName}（均衡频率 ${(solved.frequency * 100).toFixed(0)}%，` +
+              `${solved.combos} 个组合 / ${solved.riverBuckets} 个河牌桶，${solved.iterations} 次迭代，${solved.elapsedMs}ms）。`,
+          };
+        }
+      }
       if (
         ENABLE_RIVER_SOLVER &&
         activeOpponents === 1 &&

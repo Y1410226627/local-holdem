@@ -110,6 +110,8 @@ async function playHand(seed: string, challengeSeat: number, opponent: OpponentK
           : { solver: { enabled: false } }),
         ...(process.env.BLUEPRINT === '0' ? { blueprint: false } : {}),
         ...(process.env.SB_WIDE === '0' ? { sbWide: false } : {}),
+        ...(process.env.TURN_RIVER === '0' ? { turnRiver: { enabled: false } } : {}),
+        ...(process.env.BLUEPRINT_RANGES === '0' ? { blueprintRanges: false } : {}),
       });
       action = decision.action;
       const engine = decision.debug.engine ?? 'heuristic';

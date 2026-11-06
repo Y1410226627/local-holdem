@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { solveMatrixGame } from '../ai/solver/cfr';
 import { solveStreetSubgame } from '../ai/solver/subgame';
+import { solveTurnRiver } from '../ai/solver/subgameTurn';
 import { buildStreetRanges, preflopRangeFor } from '../ai/solver/ranges';
 import { preflopAdvice, solvePreflopBlueprint } from '../ai/solver/preflop';
 import { PREFLOP_BUCKETS, preflopBucketTable } from '../ai/solver/abstraction';
@@ -299,5 +300,90 @@ describe('翻前蓝图：三个历史 bug 的回归锁', () => {
       limp += (entry.strategy[limpIndex] ?? 0) * weight;
     }
     expect(limp / Math.max(1, mass)).toBeLessThan(0.6);
+  });
+});
+
+describe('转牌 + 河牌联合求解（不需要价值函数）', () => {
+  function turnView(seed: string, hole: string, villainBet: number | null) {
+    let hand = playToStreet(
+      makeHand({
+        stacks: [1000, 1000],
+        buttonIndex: 0,
+        seed,
+        holeCards: [CC(hole), CC('Qh Jh')],
+        board: CC('2h 5s 9d Tc 3c'),
+      }),
+      'turn',
+    );
+    if (villainBet !== null) {
+      hand =
+        hand.actingIndex === 0
+          ? playSequence(hand, [
+              [0, { type: 'check' }],
+              [1, { type: 'bet', amount: villainBet }],
+            ])
+          : playSequence(hand, [[1, { type: 'bet', amount: villainBet }]]);
+    } else if (hand.actingIndex === 1) {
+      hand = playSequence(hand, [[1, { type: 'check' }]]);
+    }
+    return buildPlayerView(hand, 0, seed);
+  }
+
+  it('返回合法动作与归一化混合策略', () => {
+    const view = turnView('tr-valid', '9s 9c', 100);
+    const result = solveTurnRiver(view, { iterations: 80, maxCombos: 16, riverBuckets: 3 });
+    expect(result).not.toBeNull();
+    expect(result!.strategy.reduce((sum, value) => sum + value, 0)).toBeCloseTo(1, 5);
+    expect(result!.strategy.every((value) => value >= 0 && value <= 1)).toBe(true);
+    expect(result!.riverBuckets).toBeGreaterThan(0);
+    expect(result!.actions.length).toBe(result!.strategy.length);
+  });
+
+  it('相同输入完全可复现', () => {
+    const view = turnView('tr-repeat', '9s 9c', 100);
+    const first = solveTurnRiver(view, { iterations: 60, maxCombos: 16, riverBuckets: 3 });
+    const second = solveTurnRiver(view, { iterations: 60, maxCombos: 16, riverBuckets: 3 });
+    expect(second!.strategy).toEqual(first!.strategy);
+    expect(second!.action).toEqual(first!.action);
+  });
+
+  it('收敛：200 次与 800 次迭代的平均策略一致', () => {
+    const view = turnView('tr-converge', '9s 9c', 100);
+    const fast = solveTurnRiver(view, { iterations: 200, maxCombos: 20, riverBuckets: 3 });
+    const slow = solveTurnRiver(view, { iterations: 800, maxCombos: 20, riverBuckets: 3 });
+    for (let index = 0; index < fast!.strategy.length; index++) {
+      expect(Math.abs(fast!.strategy[index] - slow!.strategy[index])).toBeLessThan(0.08);
+    }
+  });
+
+  it('面对下注：空气以弃牌为主，暗三条不会弃牌', () => {
+    const air = solveTurnRiver(turnView('tr-air', '7c 2d', 100), {
+      iterations: 200,
+      maxCombos: 20,
+      riverBuckets: 3,
+    });
+    const set = solveTurnRiver(turnView('tr-set', '9s 9c', 100), {
+      iterations: 200,
+      maxCombos: 20,
+      riverBuckets: 3,
+    });
+    const foldIndex = air!.actions.indexOf('fold');
+    expect(foldIndex).toBeGreaterThanOrEqual(0);
+    expect(air!.strategy[foldIndex]).toBeGreaterThan(0.7);
+    expect(set!.strategy[foldIndex]).toBeLessThan(0.1);
+  });
+
+  it('多人底池不套单挑解', () => {
+    const hand = playToStreet(
+      makeHand({
+        seed: 'tr-multiway',
+        holeCards: [CC('As Kd'), CC('Qh Jh'), CC('9s 9c'), CC('7c 2d')],
+        board: CC('2h 5s 9d Tc 3c'),
+      }),
+      'turn',
+    );
+    const index = hand.actingIndex!;
+    const view = buildPlayerView(hand, hand.players[index].id, 'tr-multiway');
+    expect(solveTurnRiver(view, { iterations: 30, maxCombos: 16 })).toBeNull();
   });
 });
