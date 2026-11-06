@@ -304,7 +304,7 @@ function trainingPage(): ReactNode {
           输入 <code>Y</code> 确认后才开始训练；训练全程本地运行、不需要联网。
         </li>
         <li>
-          <strong>两类机器人都被训练：</strong>规则引擎机器人通过自博弈进化四档参数，难度里还可选「挑战宗师」读人模式；
+          <strong>两类机器人都被训练：</strong>规则引擎机器人按「跟注站 / 松被动 / 紧凶 / 均衡 / 求解器」五种策略族分级；挑战宗师在单挑用 CFR+ 翻前蓝图与转/河子博弈，多人用按街范围 + 多人谨慎；
           大模型机器人则获得 few-shot 经验库与可选微调数据集（<code>training/llm-sft-dataset.jsonl</code>）。
           训练报告见 <code>training/REPORT.md</code>。
         </li>

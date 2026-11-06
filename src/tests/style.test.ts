@@ -70,8 +70,13 @@ describe('风格原型：定义与边界', () => {
 
     const beginnerManiac = applyStyleVariant(DIFFICULTY_PROFILES.beginner, STYLE_IDS[4]);
     const expertNit = applyStyleVariant(DIFFICULTY_PROFILES.expert, STYLE_IDS[2]);
-    expect(expertNit.preflop.play).toBeGreaterThan(beginnerManiac.preflop.play);
+    // 新策略族里入门是“跟注站”，入池比专家紧弱更宽是刻意的；
+    // 难度强弱改看翻后：专家 nit 的价值线更薄、诈唬更多、MC 迭代更高。
+    expect(expertNit.postflop.valueThreshold).toBeLessThan(beginnerManiac.postflop.valueThreshold);
     expect(expertNit.postflop.bluffRate).toBeGreaterThan(beginnerManiac.postflop.bluffRate);
+    expect(DIFFICULTY_PROFILES.expert.postflop.mcIterations).toBeGreaterThan(
+      DIFFICULTY_PROFILES.beginner.postflop.mcIterations,
+    );
   });
 
   it('同风格同难度结果完全确定，不同风格结果不同', () => {

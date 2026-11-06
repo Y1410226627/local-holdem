@@ -145,6 +145,12 @@ export function buildPlayerView(hand: HandState, viewerId: number, seed: string)
     })),
     log,
     actingIndex: hand.actingIndex,
-    seed: hashString(`${seed}#hand-${hand.handNo}#player-${viewerId}`),
+    // 安全：视图随机种子必须先对「牌桌 seed + 固定盐」做一次哈希，再拼 hand/player。
+    // 旧实现直接 hash(seed#hand-N#player-X)，FNV-1a 可逆，剥掉已知后缀就能还原
+    // hash(seed#hand-N)，而牌堆正是由它洗出的——等于把整副牌泄露给 AI。
+    // 先加盐后拼 hand，逆推只能得到 hash(seed#view)，与牌堆的 hash(seed#hand-N) 不同链。
+    seed: hashString(
+      `${hashString(`${seed}#view`)}#hand-${hand.handNo}#player-${viewerId}`,
+    ),
   };
 }

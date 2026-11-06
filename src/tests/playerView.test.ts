@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildPlayerView } from '../game/playerView';
-import { cardLabel } from '../game/cards';
+import { cardLabel, hashString } from '../game/cards';
 import { CC, makeHand, playSequence, playToShowdown, playToStreet } from './helpers';
 
 describe('PlayerView：信息隔离', () => {
@@ -89,5 +89,33 @@ describe('PlayerView：信息隔离', () => {
     const b = buildPlayerView(hand, 1, 'seed-x');
     expect(a1.seed).toBe(a2.seed);
     expect(a1.seed).not.toBe(b.seed);
+  });
+
+  it('视图种子不能逆推出牌堆种子（FNV 可逆攻击必须失败）', () => {
+    const hand = makeHand({ seed: 'leak-test' });
+    const view = buildPlayerView(hand, 0, 'leak-test');
+    // 旧实现：view.seed = hash(seed#hand-N#player-X)。
+    // 已知后缀可逆推 hash(seed#hand-N)，而牌堆正是由它洗出的。
+    const deckHash = hashString('leak-test#hand-1');
+    const oldViewSeed = hashString('leak-test#hand-1#player-0');
+    expect(view.seed).not.toBe(oldViewSeed);
+
+    // 实现一个最小的 FNV-1a 逆函数，模拟攻击者剥掉已知后缀。
+    // 逆元 = 0x01000193 在 2^32 下的乘法逆元。
+    const invPrime = 0x359c449b;
+    const fnvInverse = (hash: number, suffix: string): number => {
+      let h = hash >>> 0;
+      for (let i = suffix.length - 1; i >= 0; i--) {
+        h = Math.imul(h, invPrime) >>> 0;
+        h = (h ^ suffix.charCodeAt(i)) >>> 0;
+      }
+      return h >>> 0;
+    };
+    const recovered = fnvInverse(view.seed, '#hand-1#player-0');
+    expect(recovered).not.toBe(deckHash);
+    // 只能逆到「内层哈希的十进制字符串」这一层，再往前需要 32 位原像，
+    // 与牌堆的 hash(seed#hand-N) 已经不是同一条链。
+    const inner = hashString('leak-test#view');
+    expect(recovered).toBe(hashString(String(inner)));
   });
 });

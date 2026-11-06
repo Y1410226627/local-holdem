@@ -116,9 +116,18 @@ export function estimateActionEv(params: {
   const { action, view, legal, equity, opponentCount, foldToBetRate } = params;
   const pot = Math.max(1, view.pot);
   const callCost = Math.max(0, legal.callAmount);
+  // 与 depthLimitedSearch 使用同一口径：未来街 continuation 也要计入，
+  // 否则“搜索推荐”与“启发式动作”的 EV 不可比（调查员发现的 bug）。
+  const futureValue = continuationValue({
+    street: (view.street ?? 'turn') as 'preflop' | 'flop' | 'turn' | 'river',
+    equity,
+    pot,
+    effectiveStack: Math.max(1, view.self?.stack ?? 100),
+    opponentCount,
+  });
   if (action.type === 'fold') return 0;
-  if (action.type === 'check') return equity * pot * 0.95;
-  if (action.type === 'call') return equity * (pot + callCost) - callCost;
+  if (action.type === 'check') return equity * pot * 0.95 + futureValue;
+  if (action.type === 'call') return equity * (pot + callCost) - callCost + futureValue * 0.4;
   const target =
     action.type === 'allin' ? legal.maxRaiseTo : action.type === 'bet' || action.type === 'raise' ? action.amount : null;
   if (target === null) return null;
@@ -128,6 +137,6 @@ export function estimateActionEv(params: {
     0.85,
     estimateFoldProbability(fraction, foldToBetRate, opponentCount) * multiwayCaution(opponentCount),
   );
-  return evOfBet(pot, equity, betChips, foldProbability, opponentCount);
+  return evOfBet(pot, equity, betChips, foldProbability, opponentCount) + futureValue * 0.6;
 }
 

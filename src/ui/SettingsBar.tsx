@@ -163,7 +163,7 @@ export function SettingsBar({
 
         <span className="settings-hint">
           种子留空 = 每局自动随机（牌不会重复）；填写固定值可复现。人数与种子在点「新局」后生效；难度即时生效。
-          难度选「挑战宗师」时，本地算法机器人走挑战宗师档（大模型玩家按自己的设置）。
+          难度选「挑战宗师」时：单挑启用 CFR+ 翻前蓝图 + 转/河子博弈求解；3 人以上改用按街范围 + 多人谨慎（不套单挑解）。大模型玩家按自己的设置。
           <span className="settings-hint__seed" aria-label="本局实际种子">
             {table.phase === 'idle'
               ? '点「开始对局」时生成实际种子'

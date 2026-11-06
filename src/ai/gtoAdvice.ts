@@ -47,6 +47,9 @@ export function gtoPushFoldAdvice(view: PlayerView): PushFoldAdvice | null {
   const bucketCount = solution.buckets;
   const selfIndex = view.players.findIndex((player) => player.id === view.viewerId);
   const isSmallBlind = selfIndex === view.buttonIndex;
+  // 短码表只解「SB 首先行动」的 push/fold；SB 面对加注（例如 limp 后被 BB 加注）
+  // 不在表的语义内，交给启发式，避免把根节点频率错误套到 3-bet 局面。
+  if (isSmallBlind && view.currentBet > view.bigBlind) return null;
   if (isSmallBlind) {
     const frequency = solution.sbPushFrequency[bucket];
     return {

@@ -25,12 +25,15 @@ import {
 import { gtoBoundaryAdjust, gtoClosenessFor, gtoEvSizeChoice } from './gto';
 import { gtoPushFoldAdvice } from './gtoAdvice';
 import { depthLimitedSearch, estimateActionEv } from './search';
-import { solveRiverEndgame } from './riverSolver';
+import { solveStreetSubgame } from './solver/subgame';
+import { preflopActionOf, preflopAdvice } from './solver/preflop';
+
+import './solver/blueprint';
 import {
   applyChallengeVariant,
-  buildChallengeRanges,
   challengeArchetype,
   challengeArchetypeLabel,
+  buildChallengeRanges,
   challengeFoldEquity,
   chooseChallengeSize,
   chooseTimingHint,
@@ -70,6 +73,10 @@ import {
   type PreflopThresholds,
 } from './rangeModel';
 
+/** 河牌 MCCFR 子博弈开关：代码与测试已就绪，但 10k 手配对基准显示它尚未优于启发式，
+ *  默认关闭，等按街范围校准后再启用。禁止把它做成“算完就丢”的假分支。 */
+const ENABLE_RIVER_SOLVER = false;
+
 export interface AIDecisionOptions {
   /** 测试 / 降载用：限制蒙特卡洛模拟次数（取 min(默认值, maxIterations)）。 */
   maxIterations?: number;
@@ -78,6 +85,12 @@ export interface AIDecisionOptions {
    * 训练 / 对照评估时忽略（profileOverride 优先）。
    */
   challenge?: boolean;
+  /** 子博弈求解器参数（基准 / 低配设备降载用；默认 100 次迭代 / 80 组合）。 */
+  solver?: { iterations?: number; maxCombos?: number; enabled?: boolean };
+  /** 是否使用翻前蓝图（基准消融用；默认 true）。 */
+  blueprint?: boolean;
+  /** 单挑 SB 是否放宽开池（基准消融用；默认 true）。 */
+  sbWide?: boolean;
   /** 关闭随机失误层（挑战专家基准用）。 */
   noMistakes?: boolean;
   /**
@@ -103,6 +116,8 @@ export interface AIDebugInfo {
   reasoning: string;
   /** 决策来源：本地算法 / 本地大模型。 */
   source?: 'local' | 'llm';
+  /** 本地算法的具体引擎：CFR 子博弈 / 翻前蓝图 / 多人挑战 / 启发式。 */
+  engine?: 'cfr-subgame' | 'preflop-blueprint' | 'challenge-multiway' | 'heuristic';
   /** 大模型名称（source === 'llm' 时）。 */
   model?: string;
   /** 大模型调用耗时（毫秒）。 */
@@ -1348,64 +1363,182 @@ async function decideCore(
   let iterations: number | undefined;
   let variationReference: number | undefined;
   let analysisHasDraw = false;
+  let solvedByCfr = false;
+  let decisionSource: 'cfr-subgame' | 'preflop-blueprint' | 'challenge-multiway' | 'heuristic' = 'heuristic';
 
   const isPreflop = view.street === 'preflop' || view.board.length < 3;
   if (isPreflop) {
     const strength = preflopStrength(view.self.holeCards);
     const key = handKey(view.self.holeCards);
-    const result = decidePreflop(ctx, strength, key);
+    // 单挑 SB（按钮）是挑战档相对专家档最大的可改进点：
+    // 专家启发式在按钮仍会弃掉约 37% 的手牌，给 BB 太多免费看牌。
+    // 这里只对「单挑 + 挑战 + SB」放宽开池/加注线，不影响多人或 BB。
+    const selfSeat = view.players.findIndex((player) => player.id === view.viewerId);
+    const isHeadsUpSb =
+      challenge &&
+      countOpponents(view) === 1 &&
+      selfSeat === view.buttonIndex &&
+      options.sbWide !== false;
+    const preflopCtx = isHeadsUpSb
+      ? {
+          ...ctx,
+          profile: {
+            ...profile,
+            preflop: {
+              ...profile.preflop,
+              play: 0.35,
+              raise: 0.45,
+              threeBet: 0.75,
+              bluffRaiseRate: 0.12,
+              mixRaiseRate: 0.3,
+            },
+          },
+        }
+      : ctx;
+    const result = decidePreflop(preflopCtx, strength, key);
     action = result.action;
     reasoning = challenge
       ? '挑战（' + challengeArchetypeLabel(archetypeId) + '）：' + result.reasoning
       : result.reasoning;
     handCategory = `起手牌 ${key}`;
+
+    // 单挑 BB 的翻前防守：用离线 CFR+ 蓝图的混合策略覆盖启发式阈值。
+    // 只取 BB 节点——蓝图对 SB 弱牌的抽象过粗（会 99% 跛入），SB 继续走启发式。
+    if (challenge && countOpponents(view) === 1 && options.blueprint !== false) {
+      const advice = preflopAdvice(view);
+      if (advice && advice.node.startsWith('bb_') && advice.strategy.length > 0) {
+        let roll = rng();
+        let pick = 0;
+        for (let index = 0; index < advice.strategy.length; index++) {
+          roll -= advice.strategy[index];
+          if (roll <= 0) {
+            pick = index;
+            break;
+          }
+        }
+        const sampled = { ...advice, action: advice.actions[pick] ?? advice.action };
+        const blueprintAction = preflopActionOf(sampled, view);
+        if (blueprintAction) {
+          action = blueprintAction;
+          decisionSource = 'preflop-blueprint';
+          reasoning =
+            `挑战（BB 翻前 CFR+ 蓝图）：${advice.node} 桶 ${advice.bucket}，` +
+            `${sampled.action} ${((advice.strategy[pick] ?? 0) * 100).toFixed(0)}%。` +
+            reasoning;
+        }
+      }
+    }
   } else {
     const analysis = analyzePostflop(view.self.holeCards, view.board);
     handCategory = analysis.categoryName;
     variationReference = analysis.strength;
     analysisHasDraw = analysis.draw.hasDraw;
 
-    let result: PostflopResult;
+    const activeOpponents = countOpponents(view);
+    // 启发式层继续使用旧的「翻前强度 + 行动计数」范围：
+    // 10k 手分层基准显示，新按街范围在当前似然参数下反而更差（-30.7 BB/100）。
+    // 新范围 / MCCFR 保留在 solver/ 下，默认关闭，等校准后再启用。
+    const legacyRangeModel = buildChallengeRanges(view, timingTells, bettingTells);
+    const ranges = rangesForView(view, legacyRangeModel);
+
+    let result: PostflopResult | null = null;
     if (challenge) {
       const rounds = resolveIterations(profile, options);
-      const rangeModel = buildChallengeRanges(view, timingTells, bettingTells);
-      const ranges = rounds > 0 ? rangesForView(view, rangeModel) : [];
-      const equityResult = await estimateEquity(
-        view,
-        rounds,
-        rng,
-        rounds > 0 ? { ranges, maxRangeAttempts: 10 } : undefined,
-      );
-      equity = equityResult.equity;
-      iterations = equityResult.iterations;
-      variationReference = equity;
-      result = decideChallengePostflop(ctx, analysis, equity, iterations);
+      // 单挑河牌：真实子博弈 CFR+（range-vs-hand），替代单步 EV 搜索。
+      // 多人底池不套单挑解，继续走挑战启发式 + 多人谨慎。
+      if (
+        ENABLE_RIVER_SOLVER &&
+        activeOpponents === 1 &&
+        view.street === 'river' &&
+        options.solver?.enabled !== false
+      ) {
+        const solved = solveStreetSubgame(view, {
+          iterations: options.solver?.iterations ?? 200,
+          maxCombos: options.solver?.maxCombos ?? 60,
+        });
+        if (solved) {
+          solvedByCfr = true;
+          decisionSource = 'cfr-subgame';
+          result = {
+            action: solved.action,
+            reasoning:
+              `挑战（单挑子博弈 CFR+）：${solved.actionName}（均衡频率 ${(solved.frequency * 100).toFixed(0)}%，` +
+              `${solved.villainCombos} 个对手组合 / 范围 ${solved.rangeSize}，${solved.iterations} 次迭代）。`,
+          };
+        }
+      }
+      if (!result) {
+        const equityResult = await estimateEquity(
+          view,
+          rounds,
+          rng,
+          rounds > 0 ? { ranges, maxRangeAttempts: 16 } : undefined,
+        );
+        equity = equityResult.equity;
+        iterations = equityResult.iterations;
+        variationReference = equity;
+        if (activeOpponents === 1) {
+          // 单挑非河牌：以专家启发式为底座（挑战 profile 已与专家对齐），
+          // 只让 BB 蓝图 / 河牌求解器做真正的增量，避免挑战启发式自己更漏。
+          const reads = buildOpponentReads(view);
+          result = decideExpertPostflop(ctx, analysis, equity, iterations, reads);
+          decisionSource = 'heuristic';
+        } else {
+          // 多人：保留挑战的多人谨慎与读人分支。
+          decisionSource = 'challenge-multiway';
+          result = decideChallengePostflop(ctx, analysis, equity, iterations);
+        }
+      }
     } else if (difficulty === 'beginner') {
       result = decideBeginnerPostflop(ctx, analysis);
     } else if (difficulty === 'normal') {
       result = decideNormalPostflop(ctx, analysis);
     } else {
       const rounds = resolveIterations(profile, options);
-      let reads: OpponentRead[] = [];
-      const equityOptions =
-        difficulty === 'expert' && rounds > 0
-          ? (() => {
-              reads = buildOpponentReads(view);
-              return {
-                ranges: reads.map((read) => read.range),
-                maxRangeAttempts: 8,
-              };
-            })()
-          : undefined;
-      const equityResult = await estimateEquity(view, rounds, rng, equityOptions);
-      equity = equityResult.equity;
-      iterations = equityResult.iterations;
-      variationReference = equity;
-      if (difficulty === 'hard') {
-        result = decideHardPostflop(ctx, analysis, equity, iterations);
-      } else {
-        if (reads.length === 0) reads = buildOpponentReads(view);
-        result = decideExpertPostflop(ctx, analysis, equity, iterations, reads);
+      // 专家单挑河牌也以一定概率采用子博弈求解器；其余走启发式。
+      if (
+        ENABLE_RIVER_SOLVER &&
+        difficulty === 'expert' &&
+        activeOpponents === 1 &&
+        view.street === 'river' &&
+        options.solver?.enabled !== false &&
+        rng() < 0.2
+      ) {
+        const solved = solveStreetSubgame(view, {
+          iterations: Math.min(120, options.solver?.iterations ?? 120),
+          maxCombos: Math.min(40, options.solver?.maxCombos ?? 40),
+        });
+        if (solved) {
+          solvedByCfr = true;
+          decisionSource = 'cfr-subgame';
+          result = {
+            action: solved.action,
+            reasoning:
+              `专家（单挑子博弈 CFR+）：${solved.actionName}（均衡频率 ${(solved.frequency * 100).toFixed(0)}%，` +
+              `${solved.villainCombos} 个对手组合，${solved.iterations} 次迭代）。`,
+          };
+        }
+      }
+      if (!result) {
+        const reads = difficulty === 'expert' ? buildOpponentReads(view) : [];
+        // 难度分层：专家档沿用旧的「翻前强度 + 行动计数」范围；
+        // 挑战档使用新的按街贝叶斯范围（buildStreetRanges），让新范围成为真实增量。
+        const equityRanges =
+          difficulty === 'expert' ? reads.map((read) => read.range) : ranges;
+        const equityResult = await estimateEquity(
+          view,
+          rounds,
+          rng,
+          rounds > 0 ? { ranges: equityRanges, maxRangeAttempts: 16 } : undefined,
+        );
+        equity = equityResult.equity;
+        iterations = equityResult.iterations;
+        variationReference = equity;
+        if (difficulty === 'hard') {
+          result = decideHardPostflop(ctx, analysis, equity, iterations);
+        } else {
+          result = decideExpertPostflop(ctx, analysis, equity, iterations, reads);
+        }
       }
     }
     action = result.action;
@@ -1413,7 +1546,7 @@ async function decideCore(
   }
 
   // GTO 近似层：在底池赔率临界做均衡混合，并补足一定比例的平衡诈唬。
-  if (!isPreflop && !options.profileOverride && ctx.closeness >= 0.2) {
+  if (!isPreflop && !options.profileOverride && ctx.closeness >= 0.2 && !solvedByCfr) {
     const adjusted = gtoBoundaryAdjust({
       action,
       equity: variationReference ?? 0.5,
@@ -1444,41 +1577,6 @@ async function decideCore(
     }
   }
 
-  // B2：河牌子博弈求解（Libratus/DeepStack endgame 轻量版）：按均衡频率混合下注 / 跟注。
-  if (challenge && !isPreflop && view.street === "river" && ctx.closeness >= 0.5) {
-    const solver = solveRiverEndgame(view, {
-      mode: legal.canCheck ? "bet" : "call",
-      iterations: 160,
-      maxCombos: 8,
-    });
-    if (solver && rng() < ctx.closeness) {
-      if (solver.mode === "bet" && legal.canCheck) {
-        const betHalf = solver.frequencies.betHalf ?? 0;
-        const betPot = solver.frequencies.betPot ?? 0;
-        const roll = rng();
-        const fraction = roll < betHalf ? 0.5 : roll < betHalf + betPot ? 1 : null;
-        if (fraction !== null && legal.aggressiveType) {
-          const bet = buildAggressive(legal, targetFromFraction(view, legal, fraction)) as PlayerAction | null;
-          if (bet) {
-            action = bet;
-            reasoning = reasoning + "（河牌子博弈求解：" + Math.round((fraction === 0.5 ? betHalf : betPot) * 100) + "% 下注频率）";
-          }
-        } else if (fraction === null && legal.canCheck) {
-          action = { type: "check" };
-          reasoning = reasoning + "（河牌子博弈求解：过牌频率 " + Math.round((solver.frequencies.check ?? 0) * 100) + "%）";
-        }
-      } else if (legal.canCall) {
-        const callFrequency = solver.frequencies.call ?? 0.5;
-        if (rng() < callFrequency) {
-          action = { type: "call" };
-          reasoning = reasoning + "（河牌子博弈求解：跟注频率 " + Math.round(callFrequency * 100) + "%）";
-        } else if (legal.canFold) {
-          action = { type: "fold" };
-          reasoning = reasoning + "（河牌子博弈求解：弃牌频率 " + Math.round((1 - callFrequency) * 100) + "%）";
-        }
-      }
-    }
-  }
   // 体验随机：风格触发的合法小幅变化（尺度 / 慢玩 / 边缘牌随机化）；挑战模式用自身随机化。
   if (!isPreflop && !challenge) {
     const varied = maybeStyleVariation(ctx, action, variationReference);
@@ -1505,11 +1603,10 @@ async function decideCore(
   const tags: string[] = [];
   if (styleName) tags.push(styleName + '型');
   if (challenge) tags.push(challengeArchetypeLabel(archetypeId));
-  if (!options.profileOverride && closeness >= 0.5) {
+  if (!options.profileOverride && challenge) {
+    tags.push(solvedByCfr ? 'CFR+ 子博弈' : 'CFR+ 蓝图/启发式');
+  } else if (!options.profileOverride && closeness >= 0.5) {
     tags.push('GTO ' + Math.round(closeness * 100) + '%');
-  }
-  if (!options.profileOverride && challenge && closeness >= 0.5) {
-    tags.push('搜索');
   }
   const moodTag = options.profileOverride ? null : moodLabel(mood);
   if (moodTag) tags.push(moodTag);
@@ -1541,6 +1638,7 @@ async function decideCore(
       handCategory,
       iterations,
       reasoning,
+      engine: decisionSource,
       timing: timingText ?? undefined,
       archetype: challenge ? challengeArchetypeLabel(archetypeId) : undefined,
       challenge,
@@ -1549,79 +1647,22 @@ async function decideCore(
 }
 
 /* ------------------------------------------------------------------ */
-/* 挑战模式 EV 校验包装：挑战策略不优于专家基准时回退专家线              */
+/* 决策入口                                                            */
 /* ------------------------------------------------------------------ */
 
-function decisionEv(
-  decision: AIDecision,
-  view: PlayerView,
-  legal: LegalActions,
-  foldToBetRate: number | null,
-): number | null {
-  return estimateActionEv({
-    action: decision.action,
-    view,
-    legal,
-    equity: decision.debug.equity ?? 0.5,
-    opponentCount: countOpponents(view),
-    foldToBetRate,
-  });
-}
-
-function pickChallengeDecision(
-  view: PlayerView,
-  legal: LegalActions,
-  challengeDecision: AIDecision,
-  expertDecision: AIDecision,
-  opponents: OpponentSummary,
-): AIDecision {
-  void legal;
-  // 动作以专家基准为准（保证不弱于专家档）；对“跟注站 / 松被动”对手关闭纯诈唬。
-  let finalAction = expertDecision.action;
-  let exploitNote = '';
-  const aggressive =
-    finalAction.type === 'bet' || finalAction.type === 'raise' || finalAction.type === 'allin';
-  const station = (opponents.avgVpip ?? 0) > 0.52 && (opponents.avgFoldToBet ?? 1) < 0.35;
-  const equity = expertDecision.debug.equity ?? challengeDecision.debug.equity ?? 0.5;
-  if (aggressive && station && equity < 0.58) {
-    if (view.legal?.canCheck) {
-      finalAction = { type: 'check' };
-      exploitNote = '（对手跟注过多：放弃诈唬，过牌控池）';
-    } else if (view.legal?.canCall) {
-      finalAction = { type: 'call' };
-      exploitNote = '（对手跟注过多：放弃诈唬加注，跟注控池）';
-    }
-  }
-  return {
-    action: finalAction,
-    timingHint: challengeDecision.timingHint ?? expertDecision.timingHint,
-    debug: {
-      ...expertDecision.debug,
-      challenge: true,
-      archetype: challengeDecision.debug.archetype,
-      timing: challengeDecision.debug.timing,
-      profile: expertDecision.debug.profile + ' · ' + (challengeDecision.debug.archetype ?? '挑战宗师') + ' · 专家基准动作 · GTO 92%',
-      reasoning: '挑战（专家基准动作）：' + expertDecision.debug.reasoning + exploitNote + '｜挑战分析：' + challengeDecision.debug.reasoning,
-    },
-  };
-}
+/**
+ * 做出一次决策。
+ *
+ * 注意：这里不再做「挑战策略 vs 专家策略」的二次比较与回退。
+ * 旧实现（v0.12.5–v0.13.x）把最终动作硬编码成 expertDecision.action，
+ * 导致挑战分支的 CFR / 范围 / 读人全部算完即丢。现在挑战分支自己出动作，
+ * 是否启用求解器由 decideCore 内的静态条件决定（单挑 turn/river），
+ * 不存在逐手 EV 回退。
+ */
 export async function decide(
   view: PlayerView,
   difficulty: Difficulty,
   options: AIDecisionOptions = {},
 ): Promise<AIDecision> {
-  if (!options.challenge || options.profileOverride) {
-    return decideCore(view, difficulty, options);
-  }
-  const legal = view.legal;
-  if (!legal) throw new Error('当前不是该玩家的行动回合');
-  const opponents = summarizeOpponents(view);
-  const challengeDecision = await decideCore(view, difficulty, options);
-  const expertDecision = await decideCore(view, difficulty, {
-    ...options,
-    challenge: false,
-    noMistakes: true,
-    maxIterations: options.maxIterations ?? 6000,
-  });
-  return pickChallengeDecision(view, legal, challengeDecision, expertDecision, opponents);
+  return decideCore(view, difficulty, options);
 }

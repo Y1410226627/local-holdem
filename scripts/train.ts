@@ -135,24 +135,25 @@ export type MutableField =  | 'preflop.play'
 
 /** 入门档入池线边界：保持“松被动”的风格，不允许训练成紧手。 */
 const PLAY_BOUNDS: Record<Difficulty, readonly [number, number]> = {
+  // 策略族边界：入门=跟注站（最松）、普通=松被动、困难=紧凶、专家=均衡（最紧）。
   beginner: [0.05, 0.30],
-  normal: [0.25, 0.65],
-  hard: [0.35, 0.72],
-  expert: [0.42, 0.78],
+  normal: [0.25, 0.55],
+  hard: [0.40, 0.65],
+  expert: [0.45, 0.70],
 };
 
 const BLUFF_RATE_BOUNDS: Record<Difficulty, readonly [number, number]> = {
-  beginner: [0, 0.03],
-  normal: [0, 0.20],
-  hard: [0.02, 0.35],
-  expert: [0.05, 0.40],
+  beginner: [0, 0.05],
+  normal: [0, 0.18],
+  hard: [0.05, 0.28],
+  expert: [0.08, 0.32],
 };
 
 const SEMI_BLUFF_BOUNDS: Record<Difficulty, readonly [number, number]> = {
-  beginner: [0, 0.05],
-  normal: [0.05, 0.30],
-  hard: [0.15, 0.60],
-  expert: [0.20, 0.70],
+  beginner: [0, 0.12],
+  normal: [0.05, 0.28],
+  hard: [0.15, 0.55],
+  expert: [0.20, 0.65],
 };
 
 /**
@@ -489,7 +490,8 @@ function boundsForField(
     case 'postflop.valueThreshold':
       return { min: 0.50, max: 0.92, stepMin: 0.02, stepMax: 0.05 };
     case 'postflop.callMargin':
-      return { min: 0, max: 0.12, stepMin: 0.01, stepMax: 0.03 };
+      // 入门=跟注站，允许负 margin（用比底池赔率更差的牌跟注）。
+      return { min: difficulty === 'beginner' ? -0.10 : 0, max: 0.12, stepMin: 0.01, stepMax: 0.03 };
     default:
       return { min: 0, max: 0, stepMin: 0.01, stepMax: 0.02 };
   }
@@ -521,7 +523,9 @@ function clampProfileBounds(profile: DifficultyProfile, difficulty: Difficulty):
   profile.postflop.valueThreshold = round3(
     clampValue(profile.postflop.valueThreshold, 0.5, 0.92),
   );
-  profile.postflop.callMargin = round3(clampValue(profile.postflop.callMargin, 0, 0.12));
+  profile.postflop.callMargin = round3(
+    clampValue(profile.postflop.callMargin, difficulty === 'beginner' ? -0.10 : 0, 0.12),
+  );
 }
 
 export interface MutateProfileOptions {
@@ -683,11 +687,14 @@ export function validateProfileBounds(
       `postflop.valueThreshold=${profile.postflop.valueThreshold} 超出 [0.5, 0.92]`,
     );
   }
+  const marginMin = difficulty === 'beginner' ? -0.10 : 0;
   if (
-    profile.postflop.callMargin < -EPSILON ||
+    profile.postflop.callMargin < marginMin - EPSILON ||
     profile.postflop.callMargin > 0.12 + EPSILON
   ) {
-    issues.push(`postflop.callMargin=${profile.postflop.callMargin} 超出 [0, 0.12]`);
+    issues.push(
+      `postflop.callMargin=${profile.postflop.callMargin} 超出 [${marginMin}, 0.12]`,
+    );
   }
   return issues;
 }
@@ -1287,14 +1294,17 @@ export async function evaluateCandidate(
     smallBlind: options.smallBlind,
     bigBlind: options.bigBlind,
     seatsForHand: (handIndex) => {
-      const heroSeat = (heroSeatBase + handIndex) % TRAIN_PLAYER_COUNT;
+      // hero 固定在 heroSeatBase，按钮由 buttonIndex = handIndex % 4 轮转。
+      // 旧实现让 hero 与按钮同步轮转，hero 相对按钮的位置恒定（永远按钮），
+      // 导致 BB/100 被位置偏差污染。
+      const heroSeat = heroSeatBase;
+      void handIndex;
       return Array.from({ length: TRAIN_PLAYER_COUNT }, (_, seatIndex) => ({
         difficulty,
         profile: seatIndex === heroSeat ? heroProfile : opponentProfile,
       }));
     },
-    heroSeatForHand: (handIndex) =>
-      (heroSeatBase + handIndex) % TRAIN_PLAYER_COUNT,
+    heroSeatForHand: () => heroSeatBase,
   });
 }
 
@@ -1736,13 +1746,13 @@ export function renderReport(input: ReportInput): string {
     lines.push('- 并行加速：多核机器上 4 档难度同时进化，每轮的基准 + 变异候选、验证对与最终对照都并发提交；每个评估仍有独立固定 seed，并行与单线程结果一致。');
   }
   lines.push('- 每手通过 `createHand({ seed: `${seed}-h${handNo}` })` 发牌；按钮每手顺时针轮转。');
-  lines.push('- hero 座位每手轮转，最终收益按 `netChips / bigBlind / hands * 100` 换算为 BB/100，以平均位置影响。');
+  lines.push('- hero 固定在 heroSeatBase，按钮每手轮转（buttonIndex = handIndex % 4），从而让 hero 经历所有位置；最终收益按 `netChips / bigBlind / hands * 100` 换算为 BB/100。');
   lines.push('- 每轮先评估当前基准，再评估 N 个变异候选；候选与基准使用完全相同的 seed 序列（配对评估）。');
   lines.push('- 评估口径：hero 使用被评估参数，其余三个座位使用该档当前的基准参数；最终 baseline 固定使用内置基础档位，便于观察累计训练收益。');
   lines.push('- 方差控制：每轮基准 / 候选评估使用 `hands` 手；最终 baseline/trained 对照评估使用 4×hands 手（快速 100 手、默认 240 手），并共用同一 seed 序列。');
   lines.push('- 接受条件：最优候选的提升 > 0.5 BB/100。');
   lines.push('- 交叉验证：拟合集提升的候选还会在独立验证 seed 上复评；验证集回落则放弃，降低小样本过拟合。');
-  lines.push('- 四档边界：beginner 的 play 限制在 [0.05, 0.30]，normal/hard/expert 各有独立的 play/bluff/semiBluff 边界；play 单步 ±0.04~0.08，raise / threeBet 保持层级约束。');
+  lines.push('- 四档边界：beginner（跟注站）的 play 限制在 [0.05, 0.30]，normal/hard/expert 各有独立的 play/bluff/semiBluff 边界；play 单步 ±0.04~0.08，raise / threeBet 保持层级约束。');
   lines.push('- 翻牌前阈值：`decide` 通过 `preflopThresholdsForProfile(profile, position)` 读取传入的 profileOverride，因此 normal/hard/expert 的 `play` / `raise` / `threeBet` 变异会真实影响决策；beginner 分支仍主要使用 `preflop.play`。');
   lines.push('- 异常防御：AI 决策抛错或动作被引擎拒绝时，回退到 `getLegalActions` 的 check/call/fold；每手最多 500 个动作。');
   lines.push('- re-buy：任意玩家筹码低于大盲（20）时，下一手开始前统一重置为 1000，保证对局继续；hero 的净收益不计入 re-buy 注入的筹码。');
@@ -1890,7 +1900,7 @@ export function renderReport(input: ReportInput): string {
   lines.push('- 参数可能过拟合：同一 seed 的配对评估只能降低牌局噪声，不能消除策略对特定对手（同档基础参数）的过拟合。');
   lines.push('- 可重复训练：`learnedProfiles.json` 已存在时，下一次训练会从该文件继续；建议先用 `--seed=...` 换种子多次训练，再观察参数是否稳定。');
   lines.push('- 四档风格：入门档的入池线、诈唬频率、半诈唬频率都设了比高难度更窄 / 更保守的边界，避免训练把 beginner 变紧、expert 变松。');
-  lines.push('- 入门档边界：beginner 的 `preflop.play` 限制在 [0.05, 0.30]，避免训练把入门 AI 变紧；由于 beginner 决策分支只实际读取 `preflop.play` 与不可变异的 `errorRate`，入门档其余可变异字段（加注/诈唬/翻牌后阈值）通常没有行为差异，因此入门档的有效训练维度主要是 play。');
+  lines.push('- 入门档边界：beginner 的 `preflop.play` 限制在 [0.05, 0.30]，保持“跟注站”策略族；由于 beginner 决策分支只实际读取 `preflop.play` 与不可变异的 `errorRate`，入门档其余可变异字段（加注/诈唬/翻牌后阈值）通常没有行为差异，因此入门档的有效训练维度主要是 play。');
   lines.push('- 训练全程本地完成：不联网、不调用大模型、不调用任何付费服务；LLM 经验库与 SFT 数据集都只是静态文件，供本地模型做 few-shot / 可选微调。');
   lines.push('- SFT 数据集受 exhibition 手数限制：默认 120 手最多约 240 条有效样本，SFT 上限为 400 行；需要更多数据时可提高 `--exhibition` 手数。');
   lines.push('- 本报告每次训练自动覆盖；训练数据写入 `src/ai/data/` 与 `training/`，其中 `src/ai/data/` 下的 JSON 会被 Vite 打包进前端。');

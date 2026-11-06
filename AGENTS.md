@@ -15,9 +15,9 @@
 - **玩家名称**：人类名、本地算法机器人名、大模型名均可自定义（`TableConfig.humanName` / `localBotNames` / `llmSeats[].name`）。
 - **体验随机 / 风格**：每个机器人座位在 `createTable` 时由 seed 分配 `styleId`（`src/ai/style.ts` 的 6 种风格），AI 决策时叠加在难度 profile 上（偏移有限）；洗牌与决策使用 `xoshiro128**` + 用途派生随机流；本地机器人台词与思考时间抖动也在 `style.ts` / `useAiDriver.ts`。修改相关代码需更新 `style.test.ts` / `randomness.test.ts`，并保持同 seed 可复现。
 - **真人化决策**：`src/ai/humanModel.ts` 提供跨手公开统计（VPIP / PFR / 攻击性 / 面对下注弃牌率）、情绪、按难度分级的对手利用与真人式失误、fold-equity 近似 EV 尺度；`stateMachine.ts` 在每手结束累计 `statsRaw` 与 `mood`，`aiPlayer.ts` 接入四档决策，座位 HUD 显示跨手画像，LLM 提示词带 `READS` 画像。这些状态只能由公开动作推导，不得读取隐藏信息；改动需更新 `humanModel.test.ts`。
-- **挑战宗师模式**：难度选择「挑战宗师」对应 `challengeMode`；`src/ai/challenge.ts` 负责宗师原型分配（seed 可复现）、读对手下注细节 / 思考时间、范围极化、计时伪装与 EV 尺度；`stateMachine.ts` 累计每人的 `thinkMs` 统计并把宗师原型传进手牌，`aiPlayer.ts` 在 `options.challenge` 下走独立挑战分支（`profileOverride` 训练时自动关闭）。计时只来自 UI 公开传入的 `thinkMs`，AI 与人类动作都会记录；不得读取隐藏信息。改动需更新 `challenge.test.ts`。
-- **GTO / 纳什近似**：`src/ai/gto.ts` 提供均衡频率公式（MDF / 诈唬比例 α / 价值诈唬比 / 底池赔率临界）、单挑短码 push/fold 的 10 桶阈值策略 + 正则型 CFR 求解器与 EV softmax 尺度混合；`GTO_CLOSENESS` 按难度给出 2% / 12% / 30% / 55% / 92% 的均衡接近度，`aiPlayer.ts` 在翻牌后边界混合、平衡诈唬、短码单挑与挑战尺度选择中按接近度使用。接入不得破坏训练语义（`profileOverride` 时关闭），改动需更新 `gto.test.ts` 并保持 `challenge.test.ts` 通过。
-- **深度受限搜索 / 多人谨慎**：`src/ai/search.ts` 提供单步 EV 搜索（过牌 / 跟注 / 弃牌 / 3 种尺度）与多人谨慎系数；`aiPlayer.ts` 在挑战分支按接近度概率采用搜索结果，并给 debug 加「搜索」标记。这是轻量搜索（非 DeepStack 全树/价值网络），改动需更新 `gto.test.ts` 的搜索用例。
+- **挑战宗师模式（静态分流，不再逐手回退）**：`options.challenge` 下按人数选引擎——单挑翻前用离线 CFR+ 蓝图（只接 BB 防守）+ SB 放宽；单挑河牌 `solveStreetSubgame()`（双边范围外部采样 MCCFR，含加注）**默认关闭**（`ENABLE_RIVER_SOLVER=false`，基准尚未转正）；3 人用旧范围 + 多人谨慎 + 挑战启发式；4–6 人用专家启发式 + 多人谨慎。**禁止**再把挑战动作改回 `expertDecision.action`；`pickChallengeDecision` 已删除。改动需更新 `challenge.test.ts`、`solver.test.ts`、`families.test.ts`。
+- **CFR+ / 翻前蓝图 / 河牌 MCCFR / 按街范围**：`src/ai/solver/` 是新的算法层。`cfr.ts` 提供遗憾匹配+、线性平均、矩阵博弈求解；`abstraction.ts` 按**真实胜率**分 10 个桶（不再用 Chen 分数）并提供牌面纹理 / 组合；`preflop.ts` 在 HU 抽象树上跑 CFR+ 并查 `data/preflop-blueprint.json`（BB 防守已接入运行时）；`subgame.ts` 对 HU 河牌做**双边范围外部采样 MCCFR**（check/bet 33/50/100，fold/call/raise，英雄范围含自己底牌），默认关闭；`ranges.ts` 做按街贝叶斯范围更新（已实现，但启发式仍用旧 `buildChallengeRanges`，因为新似然参数下基准更差）；`blueprint.ts` 负责加载。离线生成：`npm run gto:equity` / `npm run gto:blueprint`。**约束**：求解器只接收 `PlayerView` + 自己底牌；不得把 `HandState` / `deck` / `burned` / 对手底牌传进去。改动需更新 `solver.test.ts`。
+- **单步搜索 / 多人谨慎（保留为启发式层）**：`src/ai/search.ts` 提供单步 EV 搜索与多人谨慎系数；`aiPlayer.ts` 在挑战启发式分支仍会用它，但单挑转/河优先走 `solveStreetSubgame()`。`estimateActionEv` 与搜索都计入 continuation value（口径一致）。改动需更新 `gto.test.ts` 的搜索用例。
 - **容错**：思考型模型正文为空（`finish_reason=length`）时用更短提示 + 更大 token 预算重试一次；支持 `reasoning_content` / `thinking`；仍失败则抛可读 LlmError 并回退本地算法。
 - 修改 LLM 相关代码后必须更新/补充 `src/tests/llm*.test.ts`、`advisor.test.ts`、`llmSettings.test.ts`。
 - **手机 / 安卓壳**：`capacitor.config.json` + `android/` 是 Capacitor 7 安卓工程（`webDir: dist`，appId `com.localholdem.app`）；`scripts/build-apk.mjs` 先在 ASCII 目录完成 Gradle 打包再复制回 `apk/`（本项目路径含中文，AGP 不允许原地构建）。`src/ui/mobile.ts` 负责布局断点、手机默认收起设置栏、横屏判定与 Capacitor 安卓壳检测；安卓壳内「导出历史」改走剪贴板（WebView 不支持 a[download]）。改动需更新 `src/tests/mobile.test.ts`，并保持桌面 1440×900 布局不回归。
@@ -62,7 +62,8 @@ node scripts/setup.mjs --check          # 只检查环境（启动器内部使�
 | --- | --- | --- |
 | 安装依赖 | `npm install --no-audit --no-fund` | 生成 `node_modules/`，退出码 0 |
 | 类型检查 | `npx tsc --noEmit` | 无输出、退出码 0 |
-| 测试 | `npm test` | `29 passed` 测试文件、`371 passed` 用例 |
+| 测试 | `npm test` | `30 passed` 测试文件、`383 passed` 用例 |
+| 基准 | `npm run bench` | 输出各对手 BB/100 + 95% CI + solver 占比 |
 | 构建 | `npm run build` | 生成 `dist/`，退出码 0 |
 | 训练冒烟 | `npm run train -- --rounds=1 --seed=agent-smoke` | 约 2–4 秒，退出码 0 |
 | 打包 APK（可选） | `npm run apk` | 输出 `APK_RESULT=OK`，生成 `apk/德州扑克-v<version>.apk`（首次约 2–5 分钟） |
@@ -88,7 +89,7 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 6. **可复现种子**：引擎随机性由 `seed + handNo` 决定（`src/game/cards.ts`）；UI 默认每局随机种子（`src/ui/seed.ts`）。
 7. **体验随机**：风格/随机化只能小幅调整合法动作与参数，不得破坏难度档差异、不得读取隐藏信息；所有新增随机必须走种子派生流。真人化层（跨手统计 / 情绪 / 真人式失误）同样只能基于公开动作与自己的状态，不得利用隐藏信息。
 8. 不要改动启动脚本的编码/权限约定：`.bat` 为 **UTF-8 无 BOM + CRLF**；`.sh` / `.command` 为 **LF**，且 `.command` / `.sh` 在 git 索引中需要保留可执行位（`chmod +x` / `git update-index --chmod=+x`）。
-9. **版本号（每次提交必做）**：提交前同步递增 `package.json` 与 `package-lock.json` 的 `version`，并让版本号与本次改动在同一个提交里（当前 v0.14.x：修复 / 文档 / 微调递增补丁号，成块功能递增次版本）；提交信息带上版本号。详见 [README.md](README.md)「版本号约定」。
+9. **版本号（每次提交必做）**：提交前同步递增 `package.json` 与 `package-lock.json` 的 `version`，并让版本号与本次改动在同一个提交里（当前 v0.15.x：修复 / 文档 / 微调递增补丁号，成块功能递增次版本）；提交信息带上版本号。详见 [README.md](README.md)「版本号约定」。
 10. **手机适配**：改 UI / CSS 不得破坏手机布局——≤820px 宽必须保持「牌桌 + 操作区一屏」（`.app-shell--ingame`）、设置栏收进抽屉、触摸目标 ≥46px、安全区 `env(safe-area-inset-*)` 与 `viewport-fit=cover`；桌面 1440×900 不得回归。相关判定在 `src/ui/mobile.ts`，手机样式追加在 `src/ui/styles.css` 末尾「手机 / 平板适配」分区，改动需更新 `mobile.test.ts`。
 11. **安卓 APK（每次版本更新必做）**：每个版本都要重新执行 `npm run apk` 并更新 `apk/` 目录（只保留当前版本文件），APK 的 versionName 由 `package.json` 自动生成；不要提交签名密钥（默认在 `C:\AndroidToolchain\keystore\`，已在 `android/.gitignore` 忽略）。
 
@@ -99,11 +100,12 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 | `src/game/` | 纯函数规则引擎（牌堆、牌型、下注、边池、状态机、受限视图、日志） |
 | `src/ai/` | 四档难度、范围模型、蒙特卡洛胜率、大模型机器人、训练参数；`data/` 为训练产物 |
 | `src/ui/` | React 界面（教程、大厅、牌桌、设置栏、调试面板、历史回放）；`mobile.ts` 为手机布局判定与安卓壳检测 |
-| `src/tests/` | Vitest 测试（29 个文件 / 371 个用例） |
+| `src/tests/` | Vitest 测试（30 个文件 / 383 个用例） |
 | `src/ai/style.ts` | 体验随机：机器人风格原型 / 下注尺度偏好 / 本地台词 / 变化率 |
 | `src/ai/humanModel.ts` | 真人化：跨手统计 / 情绪 / 对手利用 / 真人式失误 / fold-equity EV |
 | `src/ai/challenge.ts` | 挑战宗师：宗师原型 / 读计时与下注细节 / 计时伪装 / range 极化 / EV 尺度 |
-| `src/ai/gto.ts` | GTO 近似：均衡频率公式 / 阈值策略 CFR push-fold / EV 尺度混合 / 难度均衡接近度 |
+| `src/ai/solver/` | 真 CFR+：`cfr.ts` 原语 / `preflop.ts` 翻前蓝图 / `subgame.ts` 转河子博弈 / `ranges.ts` 按街范围 / `abstraction.ts` 真实胜率桶 |
+| `src/ai/gto.ts` | GTO 频率公式 / 短码 push-fold / EV 尺度混合（保留为启发式层） |
 | `src/ai/gtoTable.ts` | B1：离线 push/fold 策略表加载 + 筹码深度插值 |
 | `src/ai/gtoAdvice.ts` | B1：短码单挑建议（查表优先，表外回退在线求解） |
 | `src/ai/search.ts` | 深度受限搜索（单步 EV）+ 多人谨慎系数（DeepStack / Pluribus 启发） |
@@ -124,17 +126,17 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 ## 验收清单（DoD）
 
 - [ ] `node scripts/setup.mjs --agent` 退出码 0，输出 `SETUP_RESULT=OK`
-- [ ] `npm test`：29 个测试文件、371 个用例全部通过
+- [ ] `npm test`：30 个测试文件、383 个用例全部通过
 - [ ] `npm run build`：生成 `dist/`，无 TypeScript 错误
 - [ ] `npm run dev -- --host 127.0.0.1 --port 5173 --strictPort` 可启动，HTTP 探测 200
 - [ ] 启动脚本冒烟（按平台）：Windows `启动德州扑克.bat --no-open` / macOS-Linux `bash 启动德州扑克.sh --no-open` 能起服务并返回 200
 - [ ] Node.js 检测语义：已有 Node 时启动器直接跳过安装；缺 Node + `--agent` 时 exit 1 且不安装（需要自动装时用 `--install-node`）
-- [ ] `package.json` 版本号已按约定递增（当前 v0.14.x），并与本次改动在同一个提交
+- [ ] `package.json` 版本号已按约定递增（当前 v0.15.x），并与本次改动在同一个提交
 - [ ] `npm run apk` 退出码 0 且输出 `APK_RESULT=OK`；`apk/` 内只有与 `package.json` 版本一致的 APK
 - [ ] APK 冒烟：`aapt2 dump badging` 的 versionName 与 `package.json` 一致、label 为「德州扑克」；`apksigner verify` 通过（release 签名）
 - [ ] 手机布局冒烟：390×844 / 360×640 / 844×390 下进行中牌桌与操作区一屏（无纵向滚动 / 横向溢出），桌面 1440×900 正常
 - [ ] 一键同步数据冒烟：`node scripts/sync-data.mjs --help` 退出码 0；`--list` 能识别同级旧版本目录
-- [ ] 挑战宗师冒烟：`npm test` 中 `challenge.test.ts` 全绿；难度选择「挑战宗师」后座位显示徽标、调试面板出现宗师原型 / 计时伪装且无 console 报错
+- [ ] 挑战宗师冒烟：`npm test` 中 `challenge.test.ts` + `solver.test.ts` + `families.test.ts` 全绿；`npm run bench` 能输出配对 95% CI；当前挑战 vs 专家为 -9.6（CI 含 0），**不得在文档/提交信息里宣称“已证明更强”**；难度选择「挑战宗师」后座位显示徽标、调试面板出现 `CFR+ 蓝图` / `challenge-multiway`（河牌 MCCFR 默认关闭），无 console 报错
 - [ ] 工作区没有 `node_modules/`、`dist/`、日志或临时脚本被误加入提交（`.gitignore` 已覆盖）
 
 ## 常见问题

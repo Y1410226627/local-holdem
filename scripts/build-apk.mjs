@@ -51,6 +51,17 @@ function isAscii(value) {
   return /^[\x00-\x7F]*$/.test(value);
 }
 
+/** 从密钥目录的 keystore.properties 读取 storePassword（该文件不进仓库）。 */
+async function readKeystorePassword(dir) {
+  try {
+    const text = await readFile(path.join(dir, 'keystore.properties'), 'utf8');
+    const match = /^storePassword=(.+)$/m.exec(text);
+    return match ? match[1].trim() : '';
+  } catch {
+    return '';
+  }
+}
+
 /** 读取 JDK 的 release 文件，返回主版本号（读不到返回 0）。 */
 async function javaMajorVersion(jdkHome) {
   const releaseFile = path.join(jdkHome, 'release');
@@ -186,7 +197,13 @@ async function main() {
   if (!wantDebug) {
     const keystoreDir = process.env.HOLDEM_KEYSTORE_DIR || DEFAULT_KEYSTORE_DIR;
     const storeFile = path.join(keystoreDir, 'local-holdem-release.jks');
-    const storePassword = process.env.HOLDEM_KEYSTORE_PASSWORD || 'local-holdem-2026';
+    const storePassword =
+      process.env.HOLDEM_KEYSTORE_PASSWORD || (await readKeystorePassword(keystoreDir));
+    if (!storePassword) {
+      fail(
+        '缺少签名密码：请设置 HOLDEM_KEYSTORE_PASSWORD，或在密钥目录放 keystore.properties（不要提交仓库）。',
+      );
+    }
     const keyAlias = 'localholdem';
     if (!existsSync(storeFile)) {
       log(`4/5 生成发布签名密钥：${storeFile}`);

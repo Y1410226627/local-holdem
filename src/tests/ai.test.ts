@@ -464,7 +464,7 @@ describe('AI：范围模型与难度 profile', () => {
 
     expect(p.expert.postflop.betSizes.length).toBeGreaterThanOrEqual(4);
     expect(p.hard.postflop.betSizes.length).toBeGreaterThan(p.normal.postflop.betSizes.length);
-    expect(p.beginner.postflop.betSizes[0]).toBeLessThan(p.normal.postflop.betSizes[0]);
+    expect(p.beginner.postflop.betSizes.length).toBeLessThan(p.normal.postflop.betSizes.length);
 
     expect(p.beginner.preflop.positionAware).toBe(false);
     expect(p.normal.preflop.positionAware).toBe(true);

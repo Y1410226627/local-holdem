@@ -245,7 +245,7 @@ describe('GTO 短码建议与决策集成', () => {
     expect(['call', 'fold']).toContain(advice!.action);
   });
 
-  it('挑战模式 debug 标注 GTO 接近度，基础难度不标', async () => {
+  it('挑战模式 debug 标注 CFR+ 求解来源，基础难度不标', async () => {
     const hand = makeHand({
       stacks: [120, 120],
       buttonIndex: 1,
@@ -254,9 +254,10 @@ describe('GTO 短码建议与决策集成', () => {
     const view = buildPlayerView(hand, 1, 'gto-decide');
     view.self.challengeArchetypeId = 0;
     const challenge = await decide(view, 'normal', { challenge: true, maxIterations: 80 });
-    expect(challenge.debug.profile).toContain('GTO 92%');
+    expect(challenge.debug.profile).toContain('CFR+');
+    expect(challenge.debug.profile).toContain('挑战');
     const normal = await decide(view, 'normal', { maxIterations: 80 });
-    expect(normal.debug.profile).not.toContain('GTO');
+    expect(normal.debug.profile).not.toContain('CFR+');
   });
 });
 

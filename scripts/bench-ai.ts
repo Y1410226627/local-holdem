@@ -1,83 +1,199 @@
-/** 方案 B 验收基准：新挑战 AI vs 专家基线，配对展示（相同 seed 交换位置），统计胜率 / BB/100 / 延迟。 */
+/**
+ * 可信基准（替换旧版“非配对 + 无置信区间”的 bench-ai.ts）。
+ *
+ * 口径：
+ * - 同一 seed 交换座位 / 轮转座位，消除牌运与位置偏差；
+ * - 每个对手独立统计，输出均值、标准差、标准误与 95% 置信区间；
+ * - 挑战 AI 默认用降载求解器（40 迭代 / 40 组合），可用 SOLVER=0 关闭；
+ * - 统计 debug.engine，报告 CFR 子博弈 / 蓝图 / 多人 / 启发式的实际占比。
+ *
+ * 用法：
+ *   npm run bench                         # HU，2000 对，全部对手
+ *   HANDS=5000 npm run bench              # 更大样本
+ *   PLAYERS=3 npm run bench               # 3 人桌（挑战 AI 走多人启发式）
+ *   OPPONENTS=expert,caller npm run bench # 指定对手
+ *   SOLVER=0 npm run bench                # 关闭子博弈求解器（消融）
+ */
 import { act, createTable, startNextHand } from '../src/game/stateMachine';
 import { buildPlayerView } from '../src/game/playerView';
 import { decide } from '../src/ai/aiPlayer';
-import type { Difficulty, PlayerAction, TableState } from '../src/game/types';
+import type { LegalActions, PlayerAction, TableState } from '../src/game/types';
 
-const HANDS = 5000;
-const MAX_ITER = 800;
+type OpponentKind = 'expert' | 'caller' | 'folder' | 'tight' | 'shover';
 
-async function playSeries(seedPrefix: string, mode: 'new' | 'baseline') {
-  let newNet = 0;
-  let newWins = 0;
-  let decisions = 0;
-  let totalMs = 0;
-  let handsPlayed = 0;
-  for (let handNo = 0; handNo < HANDS; handNo++) {
-    let table = startNextHand(
-      createTable({
-        playerCount: 3,
-        seed: `${seedPrefix}-${handNo}`,
-        difficulty: 'expert' as Difficulty,
-        challengeMode: mode === 'baseline', // baseline 局里机器人用新 AI；人类座位=基线
-      }),
-    );
-    let guard = 0;
-    while (table.phase === 'playing') {
-      guard += 1;
-      if (guard > 500) throw new Error('hand stuck');
-      const hand = table.hand!;
-      const index = hand.actingIndex!;
-      const actor = hand.players[index];
-      const view = buildPlayerView(hand, actor.id, table.config.seed);
-      let action: PlayerAction;
-      const isNewSeat = actor.isHuman ? mode === 'new' : mode === 'baseline';
-      if (isNewSeat) {
-        const started = performance.now();
-        action = (await decide(view, 'expert', { challenge: true, maxIterations: MAX_ITER })).action;
-        totalMs += performance.now() - started;
-        decisions += 1;
-      } else {
-        action = (await decide(view, 'expert', { maxIterations: MAX_ITER })).action;
-      }
-      table = act(table, index, action);
-    }
-    handsPlayed += 1;
-    const newSeatIndex = mode === 'new' ? table.players.findIndex((p) => p.isHuman) : -1;
-    if (mode === 'new') {
-      const newPlayer = table.players[newSeatIndex];
-      const start = table.handStartStacks[newSeatIndex] ?? 0;
-      newNet += newPlayer.stack - start;
-      if (newPlayer.stack > start) newWins += 1;
-    } else {
-      // baseline 局：新 AI 是 1/2 号机器人，统计它们合计净收益作为“新 AI”收益。
-      for (const p of table.players) {
-        if (p.isHuman) continue;
-        newNet += p.stack - (table.handStartStacks[p.id] ?? 0);
-      }
-      const human = table.players.find((p) => p.isHuman)!;
-      if ((human.stack - (table.handStartStacks[human.id] ?? 0)) < 0) newWins += 1;
-    }
-  }
-  return { newNet, newWins, handsPlayed, decisions, totalMs };
+const PLAYERS = Math.max(2, Math.min(6, Number(process.env.PLAYERS ?? 2)));
+const HANDS = Math.max(20, Math.floor(Number(process.env.HANDS ?? 2000)));
+const MAX_ITER = Math.max(50, Math.floor(Number(process.env.MAX_ITER ?? 800)));
+const SOLVER_ON = process.env.SOLVER !== '0';
+const SOLVER_ITERATIONS = Math.max(10, Math.floor(Number(process.env.SOLVER_ITERATIONS ?? 200)));
+const SOLVER_COMBOS = Math.max(10, Math.floor(Number(process.env.SOLVER_COMBOS ?? 60)));
+const START_STACK = 1000;
+const SB = 10;
+const BB = 20;
+
+const defaultOpponents: OpponentKind[] =
+  PLAYERS === 2 ? ['expert', 'caller', 'folder', 'tight', 'shover'] : ['expert'];
+const opponents = (process.env.OPPONENTS?.split(',').filter(Boolean) as OpponentKind[] | undefined) ?? defaultOpponents;
+
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }
 
-const start = Date.now();
-const a = await playSeries('bench-newseat', 'new');
-const b = await playSeries('bench-newbots', 'baseline');
-const hands = a.handsPlayed + b.handsPlayed;
-const newNet = a.newNet + b.newNet;
-const newWins = a.newWins + b.newWins;
-const decisions = a.decisions + b.decisions;
-const totalMs = a.totalMs + b.totalMs;
-console.log(JSON.stringify({
-  hands,
-  newWins,
-  winRate: Number((newWins / Math.max(1, hands)).toFixed(4)),
-  newNet,
-  bbPer100: Number(((newNet / 20) / hands * 100).toFixed(1)),
-  avgDecisionMs: Number((totalMs / Math.max(1, decisions)).toFixed(1)),
-  decisions,
-  wallSeconds: Number(((Date.now() - start) / 1000).toFixed(1)),
-  maxIterations: MAX_ITER,
-}, null, 2));
+function fixedAction(kind: OpponentKind, legal: LegalActions): PlayerAction {
+  if (kind === 'caller') {
+    if (legal.canCheck) return { type: 'check' };
+    if (legal.canCall) return { type: 'call' };
+    return { type: 'fold' };
+  }
+  if (kind === 'folder') return legal.canCheck ? { type: 'check' } : { type: 'fold' };
+  if (kind === 'shover') {
+    if (legal.canAllIn) return { type: 'allin' };
+    if (legal.canCheck) return { type: 'check' };
+    if (legal.canCall) return { type: 'call' };
+    return { type: 'fold' };
+  }
+  if (kind === 'tight') {
+    if (legal.canCheck) return { type: 'check' };
+    if (legal.canCall && legal.callAmount <= BB) return { type: 'call' };
+    return { type: 'fold' };
+  }
+  return { type: 'fold' };
+}
+
+interface HandResult {
+  net: number;
+  engines: Record<string, number>;
+  decisions: number;
+}
+
+async function playHand(seed: string, challengeSeat: number, opponent: OpponentKind): Promise<HandResult> {
+  let table: TableState = createTable({
+    playerCount: PLAYERS,
+    startingStack: START_STACK,
+    smallBlind: SB,
+    bigBlind: BB,
+    seed,
+    difficulty: 'expert',
+    challengeMode: true,
+  });
+  table.players = table.players.map((player) => ({
+    ...player,
+    styleId: 0,
+    challengeArchetypeId: 0,
+    stack: START_STACK,
+  }));
+  table = startNextHand(table);
+  const rng = mulberry32(seed.length * 2654435761 + seed.charCodeAt(seed.length - 1));
+  const engines: Record<string, number> = {};
+  let decisions = 0;
+  let guard = 0;
+  while (table.phase === 'playing') {
+    guard += 1;
+    if (guard > 400) throw new Error('hand stuck: ' + seed);
+    const hand = table.hand!;
+    const index = hand.actingIndex!;
+    const view = buildPlayerView(hand, hand.players[index].id, seed);
+    let action: PlayerAction;
+    if (index === challengeSeat) {
+      const decision = await decide(view, 'expert', {
+        challenge: true,
+        maxIterations: MAX_ITER,
+        ...(SOLVER_ON
+          ? { solver: { iterations: SOLVER_ITERATIONS, maxCombos: SOLVER_COMBOS } }
+          : { solver: { enabled: false } }),
+        ...(process.env.BLUEPRINT === '0' ? { blueprint: false } : {}),
+        ...(process.env.SB_WIDE === '0' ? { sbWide: false } : {}),
+      });
+      action = decision.action;
+      const engine = decision.debug.engine ?? 'heuristic';
+      engines[engine] = (engines[engine] ?? 0) + 1;
+      decisions += 1;
+    } else if (PLAYERS === 2 && opponent !== 'expert') {
+      action = fixedAction(opponent, view.legal!);
+    } else {
+      action = (await decide(view, 'expert', { maxIterations: MAX_ITER })).action;
+    }
+    table = act(table, index, action);
+  }
+  const net = table.players[challengeSeat].stack - (table.handStartStacks[challengeSeat] ?? 0);
+  return { net, engines, decisions };
+}
+
+interface Summary {
+  players: number;
+  opponent: OpponentKind;
+  seeds: number;
+  hands: number;
+  bbPer100: number;
+  ci95: [number, number];
+  sdBBPerHand: number;
+  seBBPer100: number;
+  engines: Record<string, number>;
+  solverShare: number;
+  wallSeconds: number;
+}
+
+async function run(opponent: OpponentKind): Promise<Summary> {
+  const pairNets: number[] = [];
+  const engines: Record<string, number> = {};
+  let decisions = 0;
+  const started = Date.now();
+  for (let handNo = 0; handNo < HANDS; handNo++) {
+    const seed = `bench-${PLAYERS}p-${opponent}-${handNo}`;
+    let sum = 0;
+    for (let seat = 0; seat < PLAYERS; seat++) {
+      const result = await playHand(seed, seat, opponent);
+      sum += result.net;
+      decisions += result.decisions;
+      for (const [engine, count] of Object.entries(result.engines)) {
+        engines[engine] = (engines[engine] ?? 0) + count;
+      }
+    }
+    pairNets.push(sum / PLAYERS);
+  }
+  const n = pairNets.length;
+  const mean = pairNets.reduce((sum, value) => sum + value, 0) / n;
+  const variance = pairNets.reduce((sum, value) => sum + (value - mean) ** 2, 0) / Math.max(1, n - 1);
+  const sd = Math.sqrt(variance);
+  const se = sd / Math.sqrt(n);
+  const bbPer100 = (mean / BB) * 100;
+  const seBB = (se / BB) * 100;
+  const solverDecisions = engines['cfr-subgame'] ?? 0;
+  return {
+    players: PLAYERS,
+    opponent,
+    seeds: n,
+    hands: n * PLAYERS,
+    bbPer100: Number(bbPer100.toFixed(1)),
+    ci95: [Number((bbPer100 - 1.96 * seBB).toFixed(1)), Number((bbPer100 + 1.96 * seBB).toFixed(1))],
+    sdBBPerHand: Number((sd / BB).toFixed(2)),
+    seBBPer100: Number(seBB.toFixed(1)),
+    engines,
+    solverShare: Number((solverDecisions / Math.max(1, decisions)).toFixed(3)),
+    wallSeconds: Number(((Date.now() - started) / 1000).toFixed(1)),
+  };
+}
+
+const summaries: Summary[] = [];
+for (const opponent of opponents) {
+  const summary = await run(opponent);
+  summaries.push(summary);
+  console.log(JSON.stringify(summary));
+}
+
+console.log('\n=== 汇总（BB/100，95% CI）===');
+for (const summary of summaries) {
+  console.log(
+    `${summary.players}p vs ${summary.opponent.padEnd(7)} ${summary.bbPer100
+      .toFixed(1)
+      .padStart(8)}  [${summary.ci95[0].toFixed(1)}, ${summary.ci95[1].toFixed(1)}]  ` +
+      `solver=${(summary.solverShare * 100).toFixed(0)}%  ${summary.wallSeconds}s`,
+  );
+}

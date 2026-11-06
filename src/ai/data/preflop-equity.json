@@ -1,0 +1,852 @@
+{
+ "generatedAt": "2026-11-06T07:25:26.962Z",
+ "description": "169 类起手牌对随机手牌的真实胜率（蒙特卡洛，样本 600）",
+ "samples": 600,
+ "entries": {
+  "22": {
+   "equity": 0.49875,
+   "combos": 6,
+   "chen": 5
+  },
+  "33": {
+   "equity": 0.53958,
+   "combos": 6,
+   "chen": 5
+  },
+  "44": {
+   "equity": 0.56986,
+   "combos": 6,
+   "chen": 5
+  },
+  "55": {
+   "equity": 0.60347,
+   "combos": 6,
+   "chen": 5
+  },
+  "66": {
+   "equity": 0.615,
+   "combos": 6,
+   "chen": 6
+  },
+  "77": {
+   "equity": 0.66306,
+   "combos": 6,
+   "chen": 7
+  },
+  "88": {
+   "equity": 0.68014,
+   "combos": 6,
+   "chen": 8
+  },
+  "99": {
+   "equity": 0.73472,
+   "combos": 6,
+   "chen": 9
+  },
+  "1010": {
+   "equity": 0.75264,
+   "combos": 6,
+   "chen": 10
+  },
+  "62o": {
+   "equity": 0.33993,
+   "combos": 12,
+   "chen": -1
+  },
+  "72o": {
+   "equity": 0.34521,
+   "combos": 12,
+   "chen": -1
+  },
+  "82o": {
+   "equity": 0.36736,
+   "combos": 12,
+   "chen": -1
+  },
+  "83o": {
+   "equity": 0.37944,
+   "combos": 12,
+   "chen": -1
+  },
+  "73o": {
+   "equity": 0.36243,
+   "combos": 12,
+   "chen": 0
+  },
+  "84o": {
+   "equity": 0.39472,
+   "combos": 12,
+   "chen": 0
+  },
+  "92o": {
+   "equity": 0.39264,
+   "combos": 12,
+   "chen": 0
+  },
+  "93o": {
+   "equity": 0.39375,
+   "combos": 12,
+   "chen": 0
+  },
+  "94o": {
+   "equity": 0.40458,
+   "combos": 12,
+   "chen": 0
+  },
+  "102o": {
+   "equity": 0.41889,
+   "combos": 12,
+   "chen": 0
+  },
+  "103o": {
+   "equity": 0.42979,
+   "combos": 12,
+   "chen": 0
+  },
+  "104o": {
+   "equity": 0.42743,
+   "combos": 12,
+   "chen": 0
+  },
+  "105o": {
+   "equity": 0.43576,
+   "combos": 12,
+   "chen": 0
+  },
+  "52o": {
+   "equity": 0.33618,
+   "combos": 12,
+   "chen": 1
+  },
+  "62s": {
+   "equity": 0.37479,
+   "combos": 4,
+   "chen": 1
+  },
+  "63o": {
+   "equity": 0.35743,
+   "combos": 12,
+   "chen": 1
+  },
+  "72s": {
+   "equity": 0.39104,
+   "combos": 4,
+   "chen": 1
+  },
+  "82s": {
+   "equity": 0.40188,
+   "combos": 4,
+   "chen": 1
+  },
+  "83s": {
+   "equity": 0.38167,
+   "combos": 4,
+   "chen": 1
+  },
+  "95o": {
+   "equity": 0.42799,
+   "combos": 12,
+   "chen": 1
+  },
+  "106o": {
+   "equity": 0.46882,
+   "combos": 12,
+   "chen": 1
+  },
+  "J2o": {
+   "equity": 0.44486,
+   "combos": 12,
+   "chen": 1
+  },
+  "J3o": {
+   "equity": 0.45806,
+   "combos": 12,
+   "chen": 1
+  },
+  "J4o": {
+   "equity": 0.45514,
+   "combos": 12,
+   "chen": 1
+  },
+  "J5o": {
+   "equity": 0.47681,
+   "combos": 12,
+   "chen": 1
+  },
+  "J6o": {
+   "equity": 0.48007,
+   "combos": 12,
+   "chen": 1
+  },
+  "42o": {
+   "equity": 0.33646,
+   "combos": 12,
+   "chen": 2
+  },
+  "73s": {
+   "equity": 0.39521,
+   "combos": 4,
+   "chen": 2
+  },
+  "74o": {
+   "equity": 0.39431,
+   "combos": 12,
+   "chen": 2
+  },
+  "84s": {
+   "equity": 0.42625,
+   "combos": 4,
+   "chen": 2
+  },
+  "85o": {
+   "equity": 0.41951,
+   "combos": 12,
+   "chen": 2
+  },
+  "92s": {
+   "equity": 0.42604,
+   "combos": 4,
+   "chen": 2
+  },
+  "93s": {
+   "equity": 0.43667,
+   "combos": 4,
+   "chen": 2
+  },
+  "94s": {
+   "equity": 0.43021,
+   "combos": 4,
+   "chen": 2
+  },
+  "102s": {
+   "equity": 0.45146,
+   "combos": 4,
+   "chen": 2
+  },
+  "103s": {
+   "equity": 0.46437,
+   "combos": 4,
+   "chen": 2
+  },
+  "104s": {
+   "equity": 0.45521,
+   "combos": 4,
+   "chen": 2
+  },
+  "105s": {
+   "equity": 0.47917,
+   "combos": 4,
+   "chen": 2
+  },
+  "J7o": {
+   "equity": 0.5,
+   "combos": 12,
+   "chen": 2
+  },
+  "Q2o": {
+   "equity": 0.48229,
+   "combos": 12,
+   "chen": 2
+  },
+  "Q3o": {
+   "equity": 0.47382,
+   "combos": 12,
+   "chen": 2
+  },
+  "Q4o": {
+   "equity": 0.49229,
+   "combos": 12,
+   "chen": 2
+  },
+  "Q5o": {
+   "equity": 0.49674,
+   "combos": 12,
+   "chen": 2
+  },
+  "Q6o": {
+   "equity": 0.51465,
+   "combos": 12,
+   "chen": 2
+  },
+  "Q7o": {
+   "equity": 0.52583,
+   "combos": 12,
+   "chen": 2
+  },
+  "32o": {
+   "equity": 0.32438,
+   "combos": 12,
+   "chen": 3
+  },
+  "43o": {
+   "equity": 0.34222,
+   "combos": 12,
+   "chen": 3
+  },
+  "52s": {
+   "equity": 0.375,
+   "combos": 4,
+   "chen": 3
+  },
+  "53o": {
+   "equity": 0.36688,
+   "combos": 12,
+   "chen": 3
+  },
+  "63s": {
+   "equity": 0.40063,
+   "combos": 4,
+   "chen": 3
+  },
+  "64o": {
+   "equity": 0.38965,
+   "combos": 12,
+   "chen": 3
+  },
+  "95s": {
+   "equity": 0.45021,
+   "combos": 4,
+   "chen": 3
+  },
+  "96o": {
+   "equity": 0.4459,
+   "combos": 12,
+   "chen": 3
+  },
+  "106s": {
+   "equity": 0.50042,
+   "combos": 4,
+   "chen": 3
+  },
+  "107o": {
+   "equity": 0.48007,
+   "combos": 12,
+   "chen": 3
+  },
+  "J2s": {
+   "equity": 0.46625,
+   "combos": 4,
+   "chen": 3
+  },
+  "J3s": {
+   "equity": 0.47667,
+   "combos": 4,
+   "chen": 3
+  },
+  "J4s": {
+   "equity": 0.49958,
+   "combos": 4,
+   "chen": 3
+  },
+  "J5s": {
+   "equity": 0.50604,
+   "combos": 4,
+   "chen": 3
+  },
+  "J6s": {
+   "equity": 0.5025,
+   "combos": 4,
+   "chen": 3
+  },
+  "Q8o": {
+   "equity": 0.535,
+   "combos": 12,
+   "chen": 3
+  },
+  "K2o": {
+   "equity": 0.50438,
+   "combos": 12,
+   "chen": 3
+  },
+  "K3o": {
+   "equity": 0.51646,
+   "combos": 12,
+   "chen": 3
+  },
+  "K4o": {
+   "equity": 0.52833,
+   "combos": 12,
+   "chen": 3
+  },
+  "K5o": {
+   "equity": 0.53069,
+   "combos": 12,
+   "chen": 3
+  },
+  "K6o": {
+   "equity": 0.53833,
+   "combos": 12,
+   "chen": 3
+  },
+  "K7o": {
+   "equity": 0.55222,
+   "combos": 12,
+   "chen": 3
+  },
+  "K8o": {
+   "equity": 0.56257,
+   "combos": 12,
+   "chen": 3
+  },
+  "42s": {
+   "equity": 0.36688,
+   "combos": 4,
+   "chen": 4
+  },
+  "54o": {
+   "equity": 0.38639,
+   "combos": 12,
+   "chen": 4
+  },
+  "65o": {
+   "equity": 0.39729,
+   "combos": 12,
+   "chen": 4
+  },
+  "74s": {
+   "equity": 0.43646,
+   "combos": 4,
+   "chen": 4
+  },
+  "75o": {
+   "equity": 0.4175,
+   "combos": 12,
+   "chen": 4
+  },
+  "85s": {
+   "equity": 0.44292,
+   "combos": 4,
+   "chen": 4
+  },
+  "86o": {
+   "equity": 0.43403,
+   "combos": 12,
+   "chen": 4
+  },
+  "J7s": {
+   "equity": 0.53396,
+   "combos": 4,
+   "chen": 4
+  },
+  "J8o": {
+   "equity": 0.51715,
+   "combos": 12,
+   "chen": 4
+  },
+  "Q2s": {
+   "equity": 0.49354,
+   "combos": 4,
+   "chen": 4
+  },
+  "Q3s": {
+   "equity": 0.51708,
+   "combos": 4,
+   "chen": 4
+  },
+  "Q4s": {
+   "equity": 0.51896,
+   "combos": 4,
+   "chen": 4
+  },
+  "Q5s": {
+   "equity": 0.54958,
+   "combos": 4,
+   "chen": 4
+  },
+  "Q6s": {
+   "equity": 0.52812,
+   "combos": 4,
+   "chen": 4
+  },
+  "Q7s": {
+   "equity": 0.54458,
+   "combos": 4,
+   "chen": 4
+  },
+  "K9o": {
+   "equity": 0.56535,
+   "combos": 12,
+   "chen": 4
+  },
+  "32s": {
+   "equity": 0.35354,
+   "combos": 4,
+   "chen": 5
+  },
+  "43s": {
+   "equity": 0.37292,
+   "combos": 4,
+   "chen": 5
+  },
+  "53s": {
+   "equity": 0.39458,
+   "combos": 4,
+   "chen": 5
+  },
+  "64s": {
+   "equity": 0.4175,
+   "combos": 4,
+   "chen": 5
+  },
+  "76o": {
+   "equity": 0.42125,
+   "combos": 12,
+   "chen": 5
+  },
+  "87o": {
+   "equity": 0.45882,
+   "combos": 12,
+   "chen": 5
+  },
+  "96s": {
+   "equity": 0.47854,
+   "combos": 4,
+   "chen": 5
+  },
+  "97o": {
+   "equity": 0.45743,
+   "combos": 12,
+   "chen": 5
+  },
+  "107s": {
+   "equity": 0.50208,
+   "combos": 4,
+   "chen": 5
+  },
+  "108o": {
+   "equity": 0.49368,
+   "combos": 12,
+   "chen": 5
+  },
+  "Q8s": {
+   "equity": 0.545,
+   "combos": 4,
+   "chen": 5
+  },
+  "Q9o": {
+   "equity": 0.55215,
+   "combos": 12,
+   "chen": 5
+  },
+  "K2s": {
+   "equity": 0.50292,
+   "combos": 4,
+   "chen": 5
+  },
+  "K3s": {
+   "equity": 0.53229,
+   "combos": 4,
+   "chen": 5
+  },
+  "K4s": {
+   "equity": 0.56125,
+   "combos": 4,
+   "chen": 5
+  },
+  "K5s": {
+   "equity": 0.54854,
+   "combos": 4,
+   "chen": 5
+  },
+  "K6s": {
+   "equity": 0.57458,
+   "combos": 4,
+   "chen": 5
+  },
+  "K7s": {
+   "equity": 0.57125,
+   "combos": 4,
+   "chen": 5
+  },
+  "K8s": {
+   "equity": 0.60604,
+   "combos": 4,
+   "chen": 5
+  },
+  "A2o": {
+   "equity": 0.54583,
+   "combos": 12,
+   "chen": 5
+  },
+  "A3o": {
+   "equity": 0.55354,
+   "combos": 12,
+   "chen": 5
+  },
+  "A4o": {
+   "equity": 0.56826,
+   "combos": 12,
+   "chen": 5
+  },
+  "A5o": {
+   "equity": 0.56681,
+   "combos": 12,
+   "chen": 5
+  },
+  "A6o": {
+   "equity": 0.57681,
+   "combos": 12,
+   "chen": 5
+  },
+  "A7o": {
+   "equity": 0.59521,
+   "combos": 12,
+   "chen": 5
+  },
+  "A8o": {
+   "equity": 0.60042,
+   "combos": 12,
+   "chen": 5
+  },
+  "A9o": {
+   "equity": 0.60889,
+   "combos": 12,
+   "chen": 5
+  },
+  "54s": {
+   "equity": 0.38208,
+   "combos": 4,
+   "chen": 6
+  },
+  "65s": {
+   "equity": 0.43104,
+   "combos": 4,
+   "chen": 6
+  },
+  "75s": {
+   "equity": 0.43021,
+   "combos": 4,
+   "chen": 6
+  },
+  "86s": {
+   "equity": 0.45979,
+   "combos": 4,
+   "chen": 6
+  },
+  "98o": {
+   "equity": 0.48132,
+   "combos": 12,
+   "chen": 6
+  },
+  "109o": {
+   "equity": 0.5084,
+   "combos": 12,
+   "chen": 6
+  },
+  "J8s": {
+   "equity": 0.55583,
+   "combos": 4,
+   "chen": 6
+  },
+  "J9o": {
+   "equity": 0.52868,
+   "combos": 12,
+   "chen": 6
+  },
+  "Q10o": {
+   "equity": 0.58201,
+   "combos": 12,
+   "chen": 6
+  },
+  "K9s": {
+   "equity": 0.58708,
+   "combos": 4,
+   "chen": 6
+  },
+  "K10o": {
+   "equity": 0.60243,
+   "combos": 12,
+   "chen": 6
+  },
+  "A10o": {
+   "equity": 0.62799,
+   "combos": 12,
+   "chen": 6
+  },
+  "76s": {
+   "equity": 0.45292,
+   "combos": 4,
+   "chen": 7
+  },
+  "87s": {
+   "equity": 0.48521,
+   "combos": 4,
+   "chen": 7
+  },
+  "97s": {
+   "equity": 0.47021,
+   "combos": 4,
+   "chen": 7
+  },
+  "108s": {
+   "equity": 0.51083,
+   "combos": 4,
+   "chen": 7
+  },
+  "J10o": {
+   "equity": 0.55819,
+   "combos": 12,
+   "chen": 7
+  },
+  "Q9s": {
+   "equity": 0.55708,
+   "combos": 4,
+   "chen": 7
+  },
+  "QJo": {
+   "equity": 0.58181,
+   "combos": 12,
+   "chen": 7
+  },
+  "KJo": {
+   "equity": 0.60771,
+   "combos": 12,
+   "chen": 7
+  },
+  "A2s": {
+   "equity": 0.58125,
+   "combos": 4,
+   "chen": 7
+  },
+  "A3s": {
+   "equity": 0.57917,
+   "combos": 4,
+   "chen": 7
+  },
+  "A4s": {
+   "equity": 0.60479,
+   "combos": 4,
+   "chen": 7
+  },
+  "A5s": {
+   "equity": 0.60021,
+   "combos": 4,
+   "chen": 7
+  },
+  "A6s": {
+   "equity": 0.61,
+   "combos": 4,
+   "chen": 7
+  },
+  "A7s": {
+   "equity": 0.60688,
+   "combos": 4,
+   "chen": 7
+  },
+  "A8s": {
+   "equity": 0.61854,
+   "combos": 4,
+   "chen": 7
+  },
+  "A9s": {
+   "equity": 0.615,
+   "combos": 4,
+   "chen": 7
+  },
+  "98s": {
+   "equity": 0.50333,
+   "combos": 4,
+   "chen": 8
+  },
+  "109s": {
+   "equity": 0.54917,
+   "combos": 4,
+   "chen": 8
+  },
+  "J9s": {
+   "equity": 0.55667,
+   "combos": 4,
+   "chen": 8
+  },
+  "Q10s": {
+   "equity": 0.58021,
+   "combos": 4,
+   "chen": 8
+  },
+  "K10s": {
+   "equity": 0.61083,
+   "combos": 4,
+   "chen": 8
+  },
+  "KQo": {
+   "equity": 0.61729,
+   "combos": 12,
+   "chen": 8
+  },
+  "A10s": {
+   "equity": 0.64417,
+   "combos": 4,
+   "chen": 8
+  },
+  "AJo": {
+   "equity": 0.64479,
+   "combos": 12,
+   "chen": 8
+  },
+  "J10s": {
+   "equity": 0.58458,
+   "combos": 4,
+   "chen": 9
+  },
+  "QJs": {
+   "equity": 0.59437,
+   "combos": 4,
+   "chen": 9
+  },
+  "KJs": {
+   "equity": 0.61604,
+   "combos": 4,
+   "chen": 9
+  },
+  "AQo": {
+   "equity": 0.63056,
+   "combos": 12,
+   "chen": 9
+  },
+  "KQs": {
+   "equity": 0.61188,
+   "combos": 4,
+   "chen": 10
+  },
+  "AJs": {
+   "equity": 0.65146,
+   "combos": 4,
+   "chen": 10
+  },
+  "AKo": {
+   "equity": 0.63896,
+   "combos": 12,
+   "chen": 10
+  },
+  "AQs": {
+   "equity": 0.65396,
+   "combos": 4,
+   "chen": 11
+  },
+  "JJ": {
+   "equity": 0.7625,
+   "combos": 6,
+   "chen": 12
+  },
+  "AKs": {
+   "equity": 0.66708,
+   "combos": 4,
+   "chen": 12
+  },
+  "QQ": {
+   "equity": 0.80708,
+   "combos": 6,
+   "chen": 14
+  },
+  "KK": {
+   "equity": 0.81583,
+   "combos": 6,
+   "chen": 16
+  },
+  "AA": {
+   "equity": 0.85736,
+   "combos": 6,
+   "chen": 20
+  }
+ }
+}
