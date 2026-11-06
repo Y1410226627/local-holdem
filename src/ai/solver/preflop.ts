@@ -13,6 +13,7 @@
  * - 有明确的动作树、遗憾匹配+、线性平均与最佳回应可利用度报告。
  */
 import type { Card, PlayerAction } from '../../game/types';
+import type { RangeWeight } from '../equity';
 import type { PlayerView } from '../../game/playerView';
 import { createDeck, derivedRng, shuffle } from '../../game/cards';
 import {
@@ -71,6 +72,8 @@ const SMALL_RAISE = 2.5;
 const BIG_RAISE = 3.5;
 const THREE_BET_MULT = 3;
 const LIMP_RAISE = 3;
+/** SB 跛入后的总投入（0.5 盲注 + 0.5 补齐）。跛入后再弃牌亏的是这个数，不是 0.5。 */
+const LIMP_INVEST = 1;
 
 function terminalFold(payoffSb: number): PreflopTerminal {
   return { kind: 'fold', payoffSb };
@@ -84,7 +87,7 @@ function terminalShowdown(pot: number, investSb: number, remaining: number, alli
  * 构造翻前抽象树。收益统一以 BB 为单位，从 SB 视角计算。
  * 所有 raise 都是「加到」的总额；call 的投入由路径决定。
  */
-export function buildPreflopTree(stackBB = STACK_BB): PreflopNode {
+export function buildPreflopTree(stackBB = STACK_BB, allowLimp = true): PreflopNode {
   const S = Math.max(2, stackBB);
   const raiseSmall = Math.min(S, SMALL_RAISE);
   const raiseBig = Math.min(S, BIG_RAISE);
@@ -141,14 +144,16 @@ export function buildPreflopTree(stackBB = STACK_BB): PreflopNode {
     id: 'bb_vs_limp',
     player: 'bb',
     actions: [
-      { name: 'check', next: terminalShowdown(2, 1, Math.max(0, S - 1)) },
+      { name: 'check', next: terminalShowdown(2, LIMP_INVEST, Math.max(0, S - LIMP_INVEST)) },
       {
         name: 'raise_small',
         next: {
           id: 'sb_vs_limp_raise',
           player: 'sb',
           actions: [
-            { name: 'fold', next: terminalFold(-0.5) },
+            // 已跛入 1BB，弃牌亏 1BB。旧实现写 -0.5，把跛入成本砍半，
+            // 这是「SB 99% 跛入」的直接原因。
+            { name: 'fold', next: terminalFold(-LIMP_INVEST) },
             { name: 'call', next: terminalShowdown(LIMP_RAISE * 2, LIMP_RAISE, Math.max(0, S - LIMP_RAISE)) },
             {
               name: 'allin',
@@ -170,7 +175,7 @@ export function buildPreflopTree(stackBB = STACK_BB): PreflopNode {
           id: 'sb_vs_limp_allin',
           player: 'sb',
           actions: [
-            { name: 'fold', next: terminalFold(-0.5) },
+            { name: 'fold', next: terminalFold(-LIMP_INVEST) },
             { name: 'call', next: terminalShowdown(2 * S, S, 0, true) },
           ],
         },
@@ -183,7 +188,9 @@ export function buildPreflopTree(stackBB = STACK_BB): PreflopNode {
     player: 'sb',
     actions: [
       { name: 'fold', next: terminalFold(-0.5) },
-      { name: 'call', next: bbVsLimp },
+      // 允许跛入时把 limp 放进树里。禁用后 SB 只能「加注或弃牌」，
+      // 策略不再依赖翻后技术（我们的翻后是启发式，跛入会很吃亏）。
+      ...(allowLimp ? [{ name: 'call' as const, next: bbVsLimp }] : []),
       { name: 'raise_small', next: bbVsOpen(raiseSmall) },
       { name: 'raise_big', next: bbVsOpen(raiseBig) },
     ],
@@ -247,23 +254,63 @@ export function buildBucketEquityMatrix(samplesPerPair = 240): number[][] {
   return matrix;
 }
 
+/**
+ * 权益实现率（equity realization）：原始胜率能兑现成多少底池份额。
+ *
+ * 翻前解只与「它假设的翻后打法」一致。旧实现用 `equity × pot`（等价于假设后续街全部过牌），
+ * 完全忽略位置，这是抽象失真的主要来源。这里显式建模：
+ * - 有位置（单挑 SB / 按钮）翻后能多兑现一些（可以免费看牌、控制底池、按需下注）；
+ * - 无位置（BB）兑现少于原始胜率（被迫先行动、容易被压榨）；
+ * - SPR 越低，位置越不重要（全下之后就没有位置可言）。
+ *
+ * 份额用归一化形式保证零和：SB 拿 share、BB 拿 1−share，两者之和恒等于底池。
+ */
+const DEFAULT_REALIZATION_IP = 1.05;
+const DEFAULT_REALIZATION_OOP = 0.95;
+
+let realizationIp = DEFAULT_REALIZATION_IP;
+let realizationOop = DEFAULT_REALIZATION_OOP;
+
+function realizationFactor(remaining: number, pot: number, inPosition: boolean): number {
+  const spr = pot > 0 ? remaining / pot : 0;
+  const positionalWeight = Math.min(1, spr / 4);
+  const base = inPosition ? realizationIp : realizationOop;
+  return 1 + (base - 1) * positionalWeight;
+}
+
 function terminalEv(terminal: PreflopTerminal, equity: number): number {
   if (terminal.kind === 'fold') return terminal.payoffSb;
-  const showdown = equity * terminal.pot - terminal.investSb;
-  if (terminal.allin || terminal.remaining <= 0) return showdown;
-  const edge = equity - 0.5;
-  const future = edge * terminal.pot * 0.15 * Math.min(1, terminal.remaining / Math.max(1, terminal.pot));
-  return showdown + future;
+  // 全下：没有后续街，直接按原始胜率结算。
+  if (terminal.allin || terminal.remaining <= 0) return equity * terminal.pot - terminal.investSb;
+  const sbFactor = realizationFactor(terminal.remaining, terminal.pot, true);
+  const bbFactor = realizationFactor(terminal.remaining, terminal.pot, false);
+  const sbWeight = Math.max(1e-9, equity * sbFactor);
+  const bbWeight = Math.max(1e-9, (1 - equity) * bbFactor);
+  const share = sbWeight / (sbWeight + bbWeight);
+  return share * terminal.pot - terminal.investSb;
 }
 
 /**
  * 用 CFR+ 求解翻前抽象游戏。
  * 每个桶一个信息集；对 10×10 个桶对做全枚举 CFR（chance 节点均匀）。
  */
-export function solvePreflopBlueprint(options: { iterations?: number; stackBB?: number } = {}): PreflopBlueprint {
+export function solvePreflopBlueprint(
+  options: {
+    iterations?: number;
+    stackBB?: number;
+    /** 有位置的权益实现率（默认 1.05）。 */
+    realizationIp?: number;
+    /** 无位置的权益实现率（默认 0.95）。 */
+    realizationOop?: number;
+    /** SB 是否允许跛入（默认 true；关掉后 SB 只能加注或弃牌）。 */
+    allowLimp?: boolean;
+  } = {},
+): PreflopBlueprint {
   const iterations = Math.max(100, Math.floor(options.iterations ?? 6000));
   const stackBB = options.stackBB ?? STACK_BB;
-  const tree = buildPreflopTree(stackBB);
+  realizationIp = options.realizationIp ?? DEFAULT_REALIZATION_IP;
+  realizationOop = options.realizationOop ?? DEFAULT_REALIZATION_OOP;
+  const tree = buildPreflopTree(stackBB, options.allowLimp ?? true);
   const equityMatrix = buildBucketEquityMatrix();
   const infos = new Map<string, InfoSet>();
   const nodeSpec: Record<string, { player: 'sb' | 'bb'; actions: PreflopActionName[] }> = {};
@@ -345,49 +392,104 @@ export function solvePreflopBlueprint(options: { iterations?: number; stackBB?: 
   const average = new Map<string, number[]>();
   for (const [key, info] of infos) average.set(key, averageStrategy(info.sum));
 
-  /** 最佳回应：在 brPlayer 的节点取 max，在对手节点用平均策略。 */
-  const bestResponse = (
+  /**
+   * 真正的最佳回应（best response）。
+   *
+   * 关键点：最佳回应方**只能看到自己的桶**，不能看到对手的桶。
+   * 旧实现按 (sbBucket, bbBucket) 组合分别取 max，等价于让回应方看穿对手手牌——
+   * 那是「开了天眼的假 BR」，会把可利用度算到 3.3 BB/手并永远不下降。
+   *
+   * 正确做法：把对手每个桶的 reach 作为一个向量往下传，
+   * 在回应方的节点先对对手桶加权求和，再对动作取 max/min。
+   */
+  const brTraverse = (
     node: PreflopNode | PreflopTerminal,
-    sbBucket: number,
-    bbBucket: number,
     brPlayer: 'sb' | 'bb',
-    mode: 'max' | 'min',
+    brBucket: number,
+    oppReach: number[],
   ): number => {
-    if (!('player' in node)) return terminalEv(node, equityMatrix[sbBucket][bbBucket]);
-    const bucket = node.player === 'sb' ? sbBucket : bbBucket;
+    if (!('player' in node)) {
+      let total = 0;
+      for (let other = 0; other < PREFLOP_BUCKETS; other++) {
+        const weight = oppReach[other];
+        if (weight <= 0) continue;
+        const sbBucket = brPlayer === 'sb' ? brBucket : other;
+        const bbBucket = brPlayer === 'bb' ? brBucket : other;
+        total += weight * terminalEv(node, equityMatrix[sbBucket][bbBucket]);
+      }
+      return total;
+    }
     if (node.player === brPlayer) {
-      let best = mode === 'max' ? -Infinity : Infinity;
+      let best = brPlayer === 'sb' ? -Infinity : Infinity;
       for (const action of node.actions) {
-        const value = bestResponse(action.next, sbBucket, bbBucket, brPlayer, mode);
-        best = mode === 'max' ? Math.max(best, value) : Math.min(best, value);
+        const value = brTraverse(action.next, brPlayer, brBucket, oppReach);
+        best = brPlayer === 'sb' ? Math.max(best, value) : Math.min(best, value);
       }
       return best;
     }
-    const strategy = average.get(buildInfoKey(node.player, node.id, bucket)) ??
-      regretMatchingPlus(new Array(node.actions.length).fill(0));
     let value = 0;
     for (let index = 0; index < node.actions.length; index++) {
-      value += strategy[index] * bestResponse(node.actions[index].next, sbBucket, bbBucket, brPlayer, mode);
+      const next = new Array<number>(PREFLOP_BUCKETS).fill(0);
+      let any = false;
+      for (let other = 0; other < PREFLOP_BUCKETS; other++) {
+        if (oppReach[other] <= 0) continue;
+        const strategy =
+          average.get(buildInfoKey(node.player, node.id, other)) ??
+          regretMatchingPlus(new Array(node.actions.length).fill(0));
+        next[other] = oppReach[other] * strategy[index];
+        any = true;
+      }
+      if (any) value += brTraverse(node.actions[index].next, brPlayer, brBucket, next);
     }
     return value;
   };
 
+  /** 对 brPlayer 的每个桶算 BR 值，再对桶均匀平均（chance 均匀）。 */
   const bestResponseValue = (player: 'sb' | 'bb'): number => {
+    const uniform = new Array<number>(PREFLOP_BUCKETS).fill(1 / PREFLOP_BUCKETS);
     let total = 0;
     for (let bucket = 0; bucket < PREFLOP_BUCKETS; bucket++) {
-      let bucketTotal = 0;
-      for (let other = 0; other < PREFLOP_BUCKETS; other++) {
-        const sbBucket = player === 'sb' ? bucket : other;
-        const bbBucket = player === 'bb' ? bucket : other;
-        bucketTotal += bestResponse(tree, sbBucket, bbBucket, player, player === 'sb' ? 'max' : 'min');
-      }
-      total += bucketTotal / PREFLOP_BUCKETS;
+      total += brTraverse(tree, player, bucket, uniform);
     }
     return total / PREFLOP_BUCKETS;
   };
+
+  /**
+   * 双方都按**平均策略**行动时的期望价值。
+   *
+   * 旧实现用 `totalValue`（最后一次迭代的**当前策略**价值）作为基准去减最佳回应，
+   * 但最佳回应是对平均策略算的——两个策略组合不是同一个，减出来的差值不是可利用度。
+   * 这就是旧版可利用度卡在 3.3 BB/手、加迭代也不下降的原因。
+   */
+  const valueOfAverage = (
+    node: PreflopNode | PreflopTerminal,
+    sbBucket: number,
+    bbBucket: number,
+  ): number => {
+    if (!('player' in node)) return terminalEv(node, equityMatrix[sbBucket][bbBucket]);
+    const bucket = node.player === 'sb' ? sbBucket : bbBucket;
+    const strategy =
+      average.get(buildInfoKey(node.player, node.id, bucket)) ??
+      regretMatchingPlus(new Array(node.actions.length).fill(0));
+    let value = 0;
+    for (let index = 0; index < node.actions.length; index++) {
+      value += strategy[index] * valueOfAverage(node.actions[index].next, sbBucket, bbBucket);
+    }
+    return value;
+  };
+  let averageValue = 0;
+  for (let sb = 0; sb < PREFLOP_BUCKETS; sb++) {
+    for (let bb = 0; bb < PREFLOP_BUCKETS; bb++) {
+      averageValue += valueOfAverage(tree, sb, bb);
+    }
+  }
+  averageValue /= PREFLOP_BUCKETS * PREFLOP_BUCKETS;
+
   const sbBest = bestResponseValue('sb');
   const bbMin = bestResponseValue('bb');
-  const exploitability = Math.max(0, sbBest - totalValue) + Math.max(0, totalValue - bbMin);
+  const exploitability =
+    Math.max(0, sbBest - averageValue) + Math.max(0, averageValue - bbMin);
+  void totalValue;
 
   const entries: PreflopBlueprintEntry[] = [];
   for (const [key, info] of infos) {
@@ -521,4 +623,91 @@ export function preflopActionOf(
     default:
       return null;
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* 用蓝图构造翻后范围（策略一致的贝叶斯先验）                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 由翻前蓝图的**动作频率**构造每个对手的翻后范围权重。
+ *
+ * 这是 ReBeL / Libratus 里 belief 的简化版：对手拿到某手牌时，
+ * 走这条翻前动作线的概率 = 沿途每个动作在其信息集策略里的概率之积。
+ * 旧实现（`buildChallengeRanges`）用的是「翻前强度 + 加注次数」的启发式，
+ * 与对手实际会怎么打无关；这里换成「对手真的会这样打吗」。
+ *
+ * 只处理单挑；多人或没有蓝图时返回 null，调用方回退到旧模型。
+ */
+export function buildBlueprintRangeWeights(
+  view: PlayerView,
+): Map<number, RangeWeight> | null {
+  const blueprint = blueprintCache;
+  if (!blueprint) return null;
+  if (view.street === 'preflop') return null;
+  if (view.players.length !== 2) return null;
+  const preflopActions = view.actions.filter((record) => record.street === 'preflop');
+  if (preflopActions.length === 0) return null;
+
+  const tree = buildPreflopTree(blueprint.stackBB, true);
+  const bigBlind = Math.max(1, view.bigBlind);
+  const buttonId = view.players[view.buttonIndex]?.id;
+
+  const mapAction = (record: (typeof preflopActions)[number]): PreflopActionName | null => {
+    switch (record.action.type) {
+      case 'fold':
+        return 'fold';
+      case 'check':
+        return 'check';
+      case 'allin':
+        return 'allin';
+      case 'call':
+        return 'call';
+      case 'bet':
+      case 'raise':
+        return record.toAmount / bigBlind <= 3 ? 'raise_small' : 'raise_big';
+      default:
+        return null;
+    }
+  };
+
+  /** 某个桶走完整条翻前动作线的概率。 */
+  const lineProbability = (seat: 'sb' | 'bb', bucket: number): number => {
+    let probability = 1;
+    let node: PreflopNode | PreflopTerminal = tree;
+    for (const record of preflopActions) {
+      if (!('player' in node)) break;
+      const mapped = mapAction(record);
+      if (!mapped) return 0;
+      const index = node.actions.findIndex((action) => action.name === mapped);
+      if (index < 0) return 0;
+      if (node.player === seat) {
+        const entry = blueprint.entries.find(
+          (item) => item.node === (node as PreflopNode).id && item.bucket === bucket,
+        );
+        probability *= entry?.strategy[index] ?? 0;
+        if (probability <= 0) return 0;
+      }
+      node = node.actions[index].next;
+    }
+    return probability;
+  };
+
+  const out = new Map<number, RangeWeight>();
+  for (const player of view.players) {
+    if (player.id === view.viewerId) continue;
+    const seat: 'sb' | 'bb' = player.id === buttonId ? 'sb' : 'bb';
+    const perBucket: number[] = [];
+    for (let bucket = 0; bucket < PREFLOP_BUCKETS; bucket++) {
+      perBucket.push(lineProbability(seat, bucket));
+    }
+    const total = perBucket.reduce((sum, value) => sum + value, 0);
+    // 整条线在抽象里概率为 0（例如对手用了抽象外的尺度）：放弃，让调用方回退。
+    if (total <= 1e-9) return null;
+    out.set(player.id, (first, second) => {
+      const bucket = bucketOfCards(first, second);
+      return perBucket[bucket] ?? 0;
+    });
+  }
+  return out.size > 0 ? out : null;
 }

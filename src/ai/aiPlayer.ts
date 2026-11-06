@@ -26,7 +26,7 @@ import { gtoBoundaryAdjust, gtoClosenessFor, gtoEvSizeChoice } from './gto';
 import { gtoPushFoldAdvice } from './gtoAdvice';
 import { depthLimitedSearch, estimateActionEv } from './search';
 import { solveStreetSubgame } from './solver/subgame';
-import { preflopActionOf, preflopAdvice } from './solver/preflop';
+import { buildBlueprintRangeWeights, preflopActionOf, preflopAdvice } from './solver/preflop';
 
 import './solver/blueprint';
 import {
@@ -121,6 +121,10 @@ export interface AIDecisionOptions {
   solver?: { iterations?: number; maxCombos?: number; enabled?: boolean };
   /** 是否使用翻前蓝图（基准消融用；默认 true）。 */
   blueprint?: boolean;
+  /** 单挑 SB 是否也用蓝图（基准消融用；默认 true）。 */
+  blueprintSb?: boolean;
+  /** 翻后是否用蓝图推出的范围（基准消融用；默认 true）。 */
+  blueprintRanges?: boolean;
   /** 单挑 SB 是否放宽开池（基准消融用；默认 true）。 */
   sbWide?: boolean;
   /** 单挑 SB 翻前参数覆盖（基准消融用；默认 HU_SB_PREFLOP）。 */
@@ -1429,11 +1433,18 @@ async function decideCore(
       : result.reasoning;
     handCategory = `起手牌 ${key}`;
 
-    // 单挑 BB 的翻前防守：用离线 CFR+ 蓝图的混合策略覆盖启发式阈值。
-    // 只取 BB 节点——蓝图对 SB 弱牌的抽象过粗（会 99% 跛入），SB 继续走启发式。
+    // 单挑翻前：用离线 CFR+ 蓝图的混合策略覆盖启发式阈值（SB 与 BB 都用）。
+    //
+    // 旧版只接 BB，理由是「蓝图对 SB 弱牌会 99% 跛入」。那个现象其实是三个 bug 造成的：
+    // ①跛入后弃牌的亏损写成 −0.5（应为 −1，把跛入成本砍半）；
+    // ②分桶按「攒够 target 进位」，误差累积导致最后一个桶为空；
+    // ③最佳回应按 (SB桶, BB桶) 组合分别取 max，等于让回应方看穿对手手牌，
+    //   可利用度永远算不出真值（卡在 3.3 BB/手）。
+    // 修完后 SB 策略正常（弃 15% / 跛入 36% / 加注 48%），可以双边启用。
     if (challenge && countOpponents(view) === 1 && options.blueprint !== false) {
       const advice = preflopAdvice(view);
-      if (advice && advice.node.startsWith('bb_') && advice.strategy.length > 0) {
+      const sbAllowed = options.blueprintSb !== false;
+      if (advice && advice.strategy.length > 0 && sbAllowed) {
         let roll = rng();
         let pick = 0;
         for (let index = 0; index < advice.strategy.length; index++) {
@@ -1449,7 +1460,7 @@ async function decideCore(
           action = blueprintAction;
           decisionSource = 'preflop-blueprint';
           reasoning =
-            `挑战（BB 翻前 CFR+ 蓝图）：${advice.node} 桶 ${advice.bucket}，` +
+            `挑战（翻前 CFR+ 蓝图）：${advice.node} 桶 ${advice.bucket}，` +
             `${sampled.action} ${((advice.strategy[pick] ?? 0) * 100).toFixed(0)}%。` +
             reasoning;
         }
@@ -1466,7 +1477,15 @@ async function decideCore(
     // 10k 手分层基准显示，新按街范围在当前似然参数下反而更差（-30.7 BB/100）。
     // 新范围 / MCCFR 保留在 solver/ 下，默认关闭，等校准后再启用。
     const legacyRangeModel = buildChallengeRanges(view, timingTells, bettingTells);
-    const ranges = rangesForView(view, legacyRangeModel);
+    // 单挑：优先用「翻前蓝图动作频率」推出的策略一致范围（ReBeL belief 的简化版）；
+    // 拿不到蓝图或多人桌时回退到旧的「翻前强度 + 行动计数」模型。
+    const blueprintRanges =
+      challenge && activeOpponents === 1 && options.blueprintRanges !== false
+        ? buildBlueprintRangeWeights(view)
+        : null;
+    const ranges = blueprintRanges
+      ? rangesForView(view, blueprintRanges)
+      : rangesForView(view, legacyRangeModel);
 
     let result: PostflopResult | null = null;
     if (challenge) {

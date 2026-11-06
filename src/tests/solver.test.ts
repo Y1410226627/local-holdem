@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { solveMatrixGame } from '../ai/solver/cfr';
 import { solveStreetSubgame } from '../ai/solver/subgame';
 import { buildStreetRanges, preflopRangeFor } from '../ai/solver/ranges';
-import { preflopAdvice } from '../ai/solver/preflop';
+import { preflopAdvice, solvePreflopBlueprint } from '../ai/solver/preflop';
+import { PREFLOP_BUCKETS, preflopBucketTable } from '../ai/solver/abstraction';
 import { buildPlayerView } from '../game/playerView';
 import { decide } from '../ai/aiPlayer';
 import { CC, makeHand, playSequence, playToStreet } from './helpers';
@@ -262,5 +263,41 @@ describe('挑战引擎静态分流', () => {
       solver: { iterations: 20, maxCombos: 20 },
     });
     expect(decision.debug.engine).toBe('challenge-multiway');
+  });
+});
+
+describe('翻前蓝图：三个历史 bug 的回归锁', () => {
+  it('每个桶都非空（防止「攒够 target 进位」导致末桶为空）', () => {
+    const table = preflopBucketTable();
+    expect(table.classesOfBucket.length).toBe(PREFLOP_BUCKETS);
+    for (let bucket = 0; bucket < PREFLOP_BUCKETS; bucket++) {
+      expect(table.classesOfBucket[bucket].length).toBeGreaterThan(0);
+      for (const key of table.classesOfBucket[bucket]) {
+        expect(key).not.toBe('undefined');
+      }
+    }
+  });
+
+  it('可利用度是真值量级（防止「开天眼 BR」把可利用度算到 3+ BB/手）', () => {
+    // 用很少的迭代也能看出量级：真 BR 下收敛到 0.1 以下，
+    // 假 BR（按桶对分别取 max，等于看穿对手手牌）会停在 3 以上。
+    const blueprint = solvePreflopBlueprint({ iterations: 800, allowLimp: false });
+    expect(blueprint.exploitability).toBeLessThan(0.6);
+  });
+
+  it('SB 不会 99% 跛入（防止跛入后弃牌亏损写成 −0.5）', () => {
+    const blueprint = solvePreflopBlueprint({ iterations: 800, allowLimp: true });
+    const root = blueprint.entries.filter((entry) => entry.node === 'sb_root');
+    expect(root.length).toBeGreaterThan(0);
+    const limpIndex = blueprint.nodes.sb_root.actions.indexOf('call');
+    if (limpIndex < 0) return;
+    let mass = 0;
+    let limp = 0;
+    for (const entry of root) {
+      const weight = (preflopBucketTable().classesOfBucket[entry.bucket] ?? []).length;
+      mass += weight;
+      limp += (entry.strategy[limpIndex] ?? 0) * weight;
+    }
+    expect(limp / Math.max(1, mass)).toBeLessThan(0.6);
   });
 });

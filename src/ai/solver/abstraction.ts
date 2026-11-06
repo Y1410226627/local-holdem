@@ -23,7 +23,14 @@ export interface PreflopEquityTable {
 
 const EQUITY_TABLE = equityRaw as unknown as PreflopEquityTable;
 
-export const PREFLOP_BUCKETS = 10;
+/**
+ * 翻前强度桶数量。
+ *
+ * 10 桶太粗（每桶 ~17 个起手牌类，桶内强弱差距大）；24 桶约每桶 7 类，
+ * 配合「按组合权重分位」的分桶方式，桶内胜率方差明显更小。
+ * 提高它会线性推高离线求解时间与策略表体积，运行时不额外开销。
+ */
+export const PREFLOP_BUCKETS = 24;
 
 export function cardKey(card: Card): string {
   return `${card.rank}${card.suit}`;
@@ -99,20 +106,27 @@ export function preflopBucketTable(): BucketTable {
     .map((key) => ({ key, equity: preflopEquityOfKey(key), weight: preflopClassWeight(key) }))
     .sort((a, b) => a.equity - b.equity);
   const totalWeight = sorted.reduce((sum, item) => sum + item.weight, 0);
-  const target = totalWeight / PREFLOP_BUCKETS;
   const classesOfBucket: string[][] = Array.from({ length: PREFLOP_BUCKETS }, () => []);
   const bucketOfClass = new Map<string, number>();
+  /**
+   * 按累计权重的分位切桶（而不是「攒够 target 就进位」）。
+   *
+   * 旧写法用 `mass >= target` 进位：每个桶都会超调一点，误差累积到最后，
+   * 最后一个桶经常一个类都分不到（实测 24 桶时 bucket 23 为空，
+   * 策略表里出现 `undefined` 的起手牌）。分位法保证严格单调且不空桶。
+   */
+  const cuts = Array.from(
+    { length: PREFLOP_BUCKETS + 1 },
+    (_, index) => (totalWeight * index) / PREFLOP_BUCKETS,
+  );
   let bucket = 0;
-  let mass = 0;
+  let accumulated = 0;
   for (const item of sorted) {
-    // 当前桶已过半且还有下一个桶时，进入下一个桶（保证弱牌不会被硬塞进强桶）。
-    if (mass >= target && bucket < PREFLOP_BUCKETS - 1) {
-      bucket += 1;
-      mass = 0;
-    }
+    const midpoint = accumulated + item.weight / 2;
+    while (bucket < PREFLOP_BUCKETS - 1 && midpoint >= cuts[bucket + 1]) bucket += 1;
     classesOfBucket[bucket].push(item.key);
     bucketOfClass.set(item.key, bucket);
-    mass += item.weight;
+    accumulated += item.weight;
   }
   const boundaries: number[] = [];
   const reps: string[] = [];
