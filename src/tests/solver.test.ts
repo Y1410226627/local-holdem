@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { solveMatrixGame } from '../ai/solver/cfr';
 import { solveStreetSubgame } from '../ai/solver/subgame';
 import { solveTurnRiver } from '../ai/solver/subgameTurn';
-import { buildStreetRanges, preflopRangeFor } from '../ai/solver/ranges';
+import { buildStreetRanges, preflopRangeFor, rangeFromWeight } from '../ai/solver/ranges';
 import { preflopAdvice, solvePreflopBlueprint } from '../ai/solver/preflop';
 import { PREFLOP_BUCKETS, preflopBucketTable } from '../ai/solver/abstraction';
 import { buildPlayerView } from '../game/playerView';
@@ -385,5 +385,43 @@ describe('转牌 + 河牌联合求解（不需要价值函数）', () => {
     const index = hand.actingIndex!;
     const view = buildPlayerView(hand, hand.players[index].id, 'tr-multiway');
     expect(solveTurnRiver(view, { iterations: 30, maxCombos: 16 })).toBeNull();
+  });
+});
+
+describe('范围转换（求解器与启发式共用同一套范围）', () => {
+  it('rangeFromWeight 展开的组合数正确且不含被占用的牌', () => {
+    const hand = playToStreet(
+      makeHand({
+        stacks: [1000, 1000],
+        buttonIndex: 0,
+        seed: 'range-convert',
+        holeCards: [CC('As Kd'), CC('Qh Jh')],
+        board: CC('2h 5s 9d Tc 3c'),
+      }),
+      'river',
+    );
+    const view = buildPlayerView(hand, 0, 'range-convert');
+    const range = rangeFromWeight(view, () => 1, 1);
+    // 52 - 2（我方）- 5（公共牌）= 45 张，C(45,2) = 990
+    expect(range.size).toBe(990);
+    expect(range.has('As|Kd')).toBe(false);
+    expect(range.has('2h|5s')).toBe(false);
+  });
+
+  it('权重为 0 或非有限的组合被排除', () => {
+    const hand = playToStreet(
+      makeHand({
+        stacks: [1000, 1000],
+        buttonIndex: 0,
+        seed: 'range-zero',
+        holeCards: [CC('As Kd'), CC('Qh Jh')],
+        board: CC('2h 5s 9d Tc 3c'),
+      }),
+      'river',
+    );
+    const view = buildPlayerView(hand, 0, 'range-zero');
+    const range = rangeFromWeight(view, (first) => (first.rank === 14 ? 1 : 0), 1);
+    expect(range.size).toBeGreaterThan(0);
+    for (const key of range.keys()) expect(key.includes('14')).toBe(true);
   });
 });

@@ -167,7 +167,8 @@ async function run(opponent: OpponentKind): Promise<Summary> {
   const se = sd / Math.sqrt(n);
   const bbPer100 = (mean / BB) * 100;
   const seBB = (se / BB) * 100;
-  const solverDecisions = engines['cfr-subgame'] ?? 0;
+  // 两种求解器都算「求解器决策」，否则 solverShare 会低估求解覆盖度。
+  const solverDecisions = (engines['cfr-subgame'] ?? 0) + (engines['cfr-turn-river'] ?? 0);
   return {
     players: PLAYERS,
     opponent,
@@ -188,6 +189,19 @@ for (const opponent of opponents) {
   const summary = await run(opponent);
   summaries.push(summary);
   console.log(JSON.stringify(summary));
+}
+
+// 测量功效提示：这个项目的单手标准差约 9 BB，CI 半宽 ≈ 1.96·sd/√(手数)。
+// 把「本次分辨率」和「要分辨 10 BB/100 需要多少手」直接打出来，
+// 避免再把噪声当结论（历史上多次踩过这个坑）。
+for (const summary of summaries) {
+  const halfWidth = (summary.ci95[1] - summary.ci95[0]) / 2;
+  // CI 半宽 = 1.96 · sd / √n（单位 BB/100）=> n = (1.96 · sd · 100 / 半宽)²
+  const seedsFor10 = Math.ceil((1.96 * summary.sdBBPerHand * 100) / 10) ** 2;
+  console.log(
+    `测量功效 ${summary.players}p/${summary.opponent}: 本次 95% 分辨率 ±${halfWidth.toFixed(1)} BB/100；` +
+      `要分辨 10 BB/100 约需 ${(seedsFor10 * summary.players).toLocaleString()} 手`,
+  );
 }
 
 console.log('\n=== 汇总（BB/100，95% CI）===');

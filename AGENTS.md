@@ -15,7 +15,7 @@
 - **玩家名称**：人类名、本地算法机器人名、大模型名均可自定义（`TableConfig.humanName` / `localBotNames` / `llmSeats[].name`）。
 - **体验随机 / 风格**：每个机器人座位在 `createTable` 时由 seed 分配 `styleId`（`src/ai/style.ts` 的 6 种风格），AI 决策时叠加在难度 profile 上（偏移有限）；洗牌与决策使用 `xoshiro128**` + 用途派生随机流；本地机器人台词与思考时间抖动也在 `style.ts` / `useAiDriver.ts`。修改相关代码需更新 `style.test.ts` / `randomness.test.ts`，并保持同 seed 可复现。
 - **真人化决策**：`src/ai/humanModel.ts` 提供跨手公开统计（VPIP / PFR / 攻击性 / 面对下注弃牌率）、情绪、按难度分级的对手利用与真人式失误、fold-equity 近似 EV 尺度；`stateMachine.ts` 在每手结束累计 `statsRaw` 与 `mood`，`aiPlayer.ts` 接入四档决策，座位 HUD 显示跨手画像，LLM 提示词带 `READS` 画像。这些状态只能由公开动作推导，不得读取隐藏信息；改动需更新 `humanModel.test.ts`。
-- **挑战宗师模式（静态分流，不再逐手回退）**：`options.challenge` 下按人数选引擎——单挑翻前用离线 CFR+ 蓝图（只接 BB 防守）+ SB 放宽；单挑河牌 `solveStreetSubgame()`（双边范围、全树遍历全部 combo 同时更新的 vanilla CFR+，含加注）**默认关闭**（`ENABLE_RIVER_SOLVER=false`；配对消融 −4.9~−10.1，CI 含 0）；3 人用旧范围 + 多人谨慎 + 挑战启发式；4–6 人用专家启发式 + 多人谨慎。**禁止**再把挑战动作改回 `expertDecision.action`；`pickChallengeDecision` 已删除。改动需更新 `challenge.test.ts`、`solver.test.ts`、`families.test.ts`。
+- **挑战宗师模式（静态分流，不再逐手回退）**：`options.challenge` 下按人数选引擎——单挑翻前用离线 CFR+ 蓝图（只接 BB 防守）+ SB 放宽；单挑河牌 `solveStreetSubgame()`（双边范围、全树遍历全部 combo 同时更新的 vanilla CFR+，含加注）**默认关闭**（`ENABLE_RIVER_SOLVER=true`；配对消融 −4.9~−10.1，CI 含 0）；3 人用旧范围 + 多人谨慎 + 挑战启发式；4–6 人用专家启发式 + 多人谨慎。**禁止**再把挑战动作改回 `expertDecision.action`；`pickChallengeDecision` 已删除。改动需更新 `challenge.test.ts`、`solver.test.ts`、`families.test.ts`。
 - **CFR+ / 翻前蓝图 / 河牌 MCCFR / 按街范围**：`src/ai/solver/` 是新的算法层。`cfr.ts` 提供遗憾匹配+、线性平均、矩阵博弈求解；`abstraction.ts` 按**真实胜率**分 10 个桶（不再用 Chen 分数）并提供牌面纹理 / 组合；`preflop.ts` 在 HU 抽象树上跑 CFR+ 并查 `data/preflop-blueprint.json`（24 桶、SB+BB 双边已接入运行时，SB 树禁用跛入）；`buildBlueprintRangeWeights()` 用蓝图动作频率推出翻后范围（策略一致先验）；`subgameTurn.ts` 做**转+河联合求解**（河牌按牌面分 3 桶、桶内矩阵平均；终点是摊牌，无需价值函数），默认启用；`subgame.ts` 对 HU 河牌做**双边范围 vanilla CFR+**（全树遍历、全部 combo 同时更新；check/bet 33/50/100，fold/call/raise；平均策略跳过前 50% 迭代、前 30 轮按 √T/(√T+1) 折减遗憾），默认关闭；`ranges.ts` 做按街贝叶斯范围更新（已实现，但启发式仍用旧 `buildChallengeRanges`，因为新似然参数下基准更差）；`blueprint.ts` 负责加载。离线生成：`npm run gto:equity` / `npm run gto:blueprint`。**约束**：求解器只接收 `PlayerView` + 自己底牌；不得把 `HandState` / `deck` / `burned` / 对手底牌传进去。改动需更新 `solver.test.ts`。
 - **单步搜索 / 多人谨慎（保留为启发式层）**：`src/ai/search.ts` 提供单步 EV 搜索与多人谨慎系数；`aiPlayer.ts` 在挑战启发式分支仍会用它，但单挑转/河优先走 `solveStreetSubgame()`。`estimateActionEv` 与搜索都计入 continuation value（口径一致）。改动需更新 `gto.test.ts` 的搜索用例。
 - **容错**：思考型模型正文为空（`finish_reason=length`）时用更短提示 + 更大 token 预算重试一次；支持 `reasoning_content` / `thinking`；仍失败则抛可读 LlmError 并回退本地算法。
@@ -101,7 +101,7 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 | `src/game/` | 纯函数规则引擎（牌堆、牌型、下注、边池、状态机、受限视图、日志） |
 | `src/ai/` | 四档难度、范围模型、蒙特卡洛胜率、大模型机器人、训练参数；`data/` 为训练产物 |
 | `src/ui/` | React 界面（教程、大厅、牌桌、设置栏、调试面板、历史回放）；`mobile.ts` 为手机布局判定与安卓壳检测 |
-| `src/tests/` | Vitest 测试（30 个文件 / 393 个用例） |
+| `src/tests/` | Vitest 测试（30 个文件 / 395 个用例） |
 | `src/ai/style.ts` | 体验随机：机器人风格原型 / 下注尺度偏好 / 本地台词 / 变化率 |
 | `src/ai/humanModel.ts` | 真人化：跨手统计 / 情绪 / 对手利用 / 真人式失误 / fold-equity EV |
 | `src/ai/challenge.ts` | 挑战宗师：宗师原型 / 读计时与下注细节 / 计时伪装 / range 极化 / EV 尺度 |
@@ -127,7 +127,7 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 ## 验收清单（DoD）
 
 - [ ] `node scripts/setup.mjs --agent` 退出码 0，输出 `SETUP_RESULT=OK`
-- [ ] `npm test`：30 个测试文件、393 个用例全部通过
+- [ ] `npm test`：30 个测试文件、395 个用例全部通过
 - [ ] `npm run build`：生成 `dist/`，无 TypeScript 错误
 - [ ] `npm run dev -- --host 127.0.0.1 --port 5173 --strictPort` 可启动，HTTP 探测 200
 - [ ] 启动脚本冒烟（按平台）：Windows `启动德州扑克.bat --no-open` / macOS-Linux `bash 启动德州扑克.sh --no-open` 能起服务并返回 200

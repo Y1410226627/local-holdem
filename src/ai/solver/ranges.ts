@@ -9,6 +9,8 @@
  * 只使用公开信息：公共牌、行动历史、公开统计、自己的底牌（用于移除冲突组合）。
  */
 import type { Card, PlayerAction, Street } from '../../game/types';
+import type { RangeWeight } from '../equity';
+import { createDeck } from '../../game/cards';
 import type { PlayerView } from '../../game/playerView';
 import {
   allCombos,
@@ -296,4 +298,34 @@ export function equityVsRange(
     total += entry.weight;
   }
   return total > 0 ? score / samples : 0.5;
+}
+
+/**
+ * 把 `RangeWeight`（启发式层用的 `(first, second) => weight` 闭包）
+ * 展开成求解器要的 `Range`（comboKey → 权重）。
+ *
+ * 目的：让**求解器与启发式用同一套范围**。之前求解器内部另建了一套按街范围，
+ * 与启发式不一致，导致「转牌按均衡打、河牌按启发式打」的割裂。
+ */
+export function rangeFromWeight(
+  view: PlayerView,
+  weight: RangeWeight,
+  playerId: number,
+  includeSelfCards = false,
+): Range {
+  const blocked = new Set<string>(view.board.map(cardKey));
+  if (!includeSelfCards) for (const card of view.self.holeCards) blocked.add(cardKey(card));
+  void playerId;
+  const deck = createDeck().filter((card) => !blocked.has(cardKey(card)));
+  const out: Range = new Map();
+  for (let i = 0; i < deck.length; i++) {
+    for (let j = i + 1; j < deck.length; j++) {
+      const first = deck[i];
+      const second = deck[j];
+      const value = weight(first, second);
+      if (!Number.isFinite(value) || value <= 0) continue;
+      out.set(comboKey(first, second), value);
+    }
+  }
+  return out;
 }

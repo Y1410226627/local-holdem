@@ -28,6 +28,7 @@ import { depthLimitedSearch, estimateActionEv } from './search';
 import { solveStreetSubgame } from './solver/subgame';
 import { solveTurnRiver } from './solver/subgameTurn';
 import { buildBlueprintRangeWeights, preflopActionOf, preflopAdvice } from './solver/preflop';
+import { rangeFromWeight, type Range } from './solver/ranges';
 
 import './solver/blueprint';
 import {
@@ -93,7 +94,7 @@ import {
  * 因此默认关闭。打开只需改这一行；打开时建议同时保留「只在面对下注时启用」的门控，
  * 那是四次消融里最好的一档。禁止把它做成“算完就丢”的假分支。
  */
-const ENABLE_RIVER_SOLVER = false;
+const ENABLE_RIVER_SOLVER = true;
 
 /**
  * 转牌 + 河牌**联合**求解开关。
@@ -1487,9 +1488,7 @@ async function decideCore(
     analysisHasDraw = analysis.draw.hasDraw;
 
     const activeOpponents = countOpponents(view);
-    // 启发式层继续使用旧的「翻前强度 + 行动计数」范围：
-    // 10k 手分层基准显示，新按街范围在当前似然参数下反而更差（-30.7 BB/100）。
-    // 新范围 / MCCFR 保留在 solver/ 下，默认关闭，等校准后再启用。
+    // 旧的「翻前强度 + 行动计数」范围只在拿不到蓝图时兜底（多人桌 / 蓝图缺失）。
     const legacyRangeModel = buildChallengeRanges(view, timingTells, bettingTells);
     // 单挑：优先用「翻前蓝图动作频率」推出的策略一致范围（ReBeL belief 的简化版）；
     // 拿不到蓝图或多人桌时回退到旧的「翻前强度 + 行动计数」模型。
@@ -1497,16 +1496,22 @@ async function decideCore(
       challenge && activeOpponents === 1 && options.blueprintRanges !== false
         ? buildBlueprintRangeWeights(view)
         : null;
-    const ranges = blueprintRanges
-      ? rangesForView(view, blueprintRanges)
-      : rangesForView(view, legacyRangeModel);
+    const rangeWeights = blueprintRanges ?? legacyRangeModel;
+    const ranges = rangesForView(view, rangeWeights);
+    // 求解器用**同一套范围权重**展开成的 Range，避免「求解器内部另建范围」导致
+    // 转牌按均衡打、河牌按启发式打的割裂。
+    const solverRanges = new Map<number, Range>();
+    if (activeOpponents === 1) {
+      for (const [playerId, weight] of rangeWeights) {
+        solverRanges.set(playerId, rangeFromWeight(view, weight, playerId));
+      }
+    }
 
     let result: PostflopResult | null = null;
     if (challenge) {
       const rounds = resolveIterations(profile, options);
-      // 单挑河牌：真实子博弈 CFR+（range-vs-hand），替代单步 EV 搜索。
-      // 多人底池不套单挑解，继续走挑战启发式 + 多人谨慎。
       // 单挑转牌：转+河联合 CFR+（精确，不依赖价值函数）。
+      // 多人底池不套单挑解，继续走挑战启发式 + 多人谨慎。
       if (
         ENABLE_TURN_RIVER_SOLVER &&
         activeOpponents === 1 &&
@@ -1517,6 +1522,7 @@ async function decideCore(
           iterations: options.turnRiver?.iterations ?? 160,
           maxCombos: options.turnRiver?.maxCombos ?? 20,
           riverBuckets: options.turnRiver?.riverBuckets ?? 3,
+          ranges: solverRanges.size > 0 ? solverRanges : undefined,
           // 默认不设时间预算：时间预算会让迭代数随机器负载变化，导致同一局面决策不确定，
           // 基准无法复现。固定迭代数（160）在本机中位 181ms，已可接受。
           timeBudgetMs: options.turnRiver?.timeBudgetMs ?? 0,
@@ -1542,6 +1548,7 @@ async function decideCore(
         const solved = solveStreetSubgame(view, {
           iterations: options.solver?.iterations ?? 800,
           maxCombos: options.solver?.maxCombos ?? 48,
+          ranges: solverRanges.size > 0 ? solverRanges : undefined,
         });
         if (solved) {
           solvedByCfr = true;
