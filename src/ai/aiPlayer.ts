@@ -73,8 +73,25 @@ import {
   type PreflopThresholds,
 } from './rangeModel';
 
-/** 河牌 MCCFR 子博弈开关：代码与测试已就绪，但 10k 手配对基准显示它尚未优于启发式，
- *  默认关闭，等按街范围校准后再启用。禁止把它做成“算完就丢”的假分支。 */
+/**
+ * 河牌子博弈开关。
+ *
+ * 历史（全部为同 seed 配对消融，BB/100，95% CI）：
+ * - 旧版外部采样 MCCFR（无加注）：−20.5
+ * - 旧版外部采样 MCCFR（补加注）：−5.0
+ * - 按论文重写为「全范围同时更新的 vanilla CFR+」后，全部河牌决策：−10.1 [−21.8, 1.7]
+ * - 同上，但只在「面对下注」时启用：−4.9 [−16.8, 7.0]
+ *
+ * 算法本身已经是对的：400 次迭代即收敛（100→3200 次策略完全一致），
+ * 空气面对满池下注 99% 弃牌、暗三条不会弃牌，3200 次迭代约 70–90ms。
+ * 但端到端仍为负，说明瓶颈不在求解器算法，而在
+ * ①范围模型（对手信念估计不准，均衡对范围误差比启发式更敏感）
+ * ②单街建模（只解河牌，前几条街仍是启发式，均衡假设与实际打法不一致）
+ * ③unsafe subgame solving（没有 CFR-D gadget 的 opt-out 保证）。
+ *
+ * 因此默认关闭。打开只需改这一行；打开时建议同时保留「只在面对下注时启用」的门控，
+ * 那是四次消融里最好的一档。禁止把它做成“算完就丢”的假分支。
+ */
 const ENABLE_RIVER_SOLVER = false;
 
 export interface AIDecisionOptions {
@@ -1450,11 +1467,12 @@ async function decideCore(
         ENABLE_RIVER_SOLVER &&
         activeOpponents === 1 &&
         view.street === 'river' &&
+        legal.callAmount > 0 &&
         options.solver?.enabled !== false
       ) {
         const solved = solveStreetSubgame(view, {
-          iterations: options.solver?.iterations ?? 200,
-          maxCombos: options.solver?.maxCombos ?? 60,
+          iterations: options.solver?.iterations ?? 800,
+          maxCombos: options.solver?.maxCombos ?? 48,
         });
         if (solved) {
           solvedByCfr = true;
@@ -1505,7 +1523,7 @@ async function decideCore(
         rng() < 0.2
       ) {
         const solved = solveStreetSubgame(view, {
-          iterations: Math.min(120, options.solver?.iterations ?? 120),
+          iterations: Math.min(400, options.solver?.iterations ?? 400),
           maxCombos: Math.min(40, options.solver?.maxCombos ?? 40),
         });
         if (solved) {

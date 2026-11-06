@@ -265,7 +265,13 @@ export function sampleRange(
   if (mustInclude) {
     const key = comboKey(mustInclude[0], mustInclude[1]);
     if (!picked.some((entry) => entry.combo.key === key)) {
-      picked.push({ combo: { first: mustInclude[0], second: mustInclude[1], key }, weight: 1 });
+      // 强制加入的那手牌必须用它在范围里的**真实权重**，不能用 1：
+      // 采样后我们会按 weight 归一化成 reach，权重 1 会让这一手吃掉整个范围
+      // （范围里 100 手牌各 0.01 时，权重 1 的手牌占 ~70%）。
+      picked.push({
+        combo: { first: mustInclude[0], second: mustInclude[1], key },
+        weight: Math.max(1e-6, range.get(key) ?? 0),
+      });
     }
   }
   return picked;

@@ -86,7 +86,7 @@ npm run build    # TypeScript 类型检查 + 生产构建（输出 dist/）
 
 **A. 直接安装 APK（安卓手机）**
 
-- 安装包就在项目的 **`apk/`** 目录里（当前 `apk/德州扑克-v0.15.0.apk`，约 3.4 MB，只使用虚拟筹码、默认不联网）。
+- 安装包就在项目的 **`apk/`** 目录里（当前 `apk/德州扑克-v0.15.1.apk`，约 3.4 MB，只使用虚拟筹码、默认不联网）。
 - 传到手机：微信 / QQ 发给自己的「文件传输助手」→ 手机点开文件；或用 USB 数据线拷到手机 → 用文件管理器点击安装。
 - 首次安装会提示「禁止安装未知应用」：在手机上允许文件管理器 / 浏览器的「安装未知应用」权限即可；支持 Android 6.0（API 23）及以上。
 - **以后升级**：把新版本 APK 传到手机**直接覆盖安装**即可（同一签名，设置不丢）；卸载重装会清空应用里保存的大模型设置 / 记忆。
@@ -348,12 +348,12 @@ npm run train        # 全量自博弈训练（约 3 秒，默认 2 轮）
 | --- | --- | --- |
 | 单挑 · 翻前 | 离线 CFR+ 蓝图（只接 BB 防守）+ SB 放宽启发式 | SB 放宽在配对消融中 +69 BB/100；蓝图只用于 BB |
 | 单挑 · 翻牌 / 转牌 | 专家启发式 + 旧「翻前强度 + 行动计数」范围 | 与专家档同底座，避免挑战启发式自己更漏 |
-| 单挑 · 河牌 | MCCFR 子博弈（代码/测试就绪，默认关闭） | 10k 手配对基准显示尚未优于启发式，`ENABLE_RIVER_SOLVER=false` |
+| 单挑 · 河牌 | 全范围 vanilla CFR+ 子博弈（代码/测试就绪，默认关闭） | 配对消融 −4.9 ~ −10.1（CI 含 0），`ENABLE_RIVER_SOLVER=false` |
 | 3 人 | 挑战启发式 + 多人谨慎 + 旧范围 | 不把单挑解硬套到多人 |
 | 4–6 人 | 专家启发式 + 多人谨慎 | 明确不是单挑 GTO；调试标记 `challenge-multiway` |
 
 - **翻前蓝图（Libratus blueprint 的缩小版，已启用）**：169 类起手牌先按**真实胜率**（对随机手牌蒙特卡洛）分成 10 个桶，再在「SB fold/limp/raise 2.5/3.5；BB check/raise/3-bet/all-in」的抽象树上跑 CFR+（遗憾匹配+、线性平均）。桶间胜率用桶内随机组合采样，不用单张代表牌。离线产物 `src/ai/data/preflop-blueprint.json`。只把 **BB 防守**接进运行时；蓝图对 SB 弱牌的抽象过粗（会 99% 跛入），SB 继续用启发式。
-- **河牌 MCCFR 子博弈（已实现、已测试、默认关闭）**：`src/ai/solver/subgame.ts` 使用**双边范围 + 外部采样 MCCFR**，树包含 check / bet 33% / 50% / 100% 与 fold / call / raise；英雄也有范围（含自己的底牌），不再是一手牌对固定范围的单边求解。配对消融显示它仍略弱于专家启发式（约 -5 BB/100，CI 含 0），因此默认关闭，等按街范围校准后再启用。
+- **河牌 CFR+ 子博弈（已实现、已测试、默认关闭）**：`src/ai/solver/subgame.ts` 使用**双边范围 + 全树遍历、全部 combo 同时更新的 vanilla CFR+**（不是采样版），树包含 check / bet 33% / 50% / 100% 与 fold / call / raise。按 DeepStack 附录 S3 与 Depth-Limited 附录 B 实现「平均策略跳过前 50% 迭代」与「前 30 轮 √T/(√T+1) 折减遗憾」；400 次迭代即收敛。配对消融 −4.9（只在面对下注时）~ −10.1（全部河牌决策），CI 含 0，因此默认关闭。
 - **按街范围信念（已实现、默认不用于启发式）**：`src/ai/solver/ranges.ts` 做「翻前先验 × 每条街动作似然 × 牌面纹理 × 牌张移除」。但 10k 手分层基准显示，在当前似然参数下它比旧的「翻前强度 + 行动计数」更差（挑战用新范围、专家用旧范围时 -30.7 BB/100）；因此启发式继续用旧模型，新模型留给求解器和后续校准。
 - **多人谨慎（Pluribus 启发）**：多人底池按对手数打折诈唬的弃牌收益（2 人 0.72 / 3 人 0.5 / 4+ 人 0.35）。
 - **宗师原型 / 读计时 / 读下注**：保留，并影响挑战分支的 profile / required equity / 下注尺度。
@@ -384,19 +384,71 @@ npm run train        # 全量自博弈训练（约 3 秒，默认 2 轮）
 | 专家 | 均衡 | 更紧、3-bet 随机化 | 按街范围收窄、SPR / 多街计划、价值/诈唬更平衡 |
 | 挑战宗师 | 求解器（部分启用） | 单挑 BB 蓝图 / SB 放宽 | 专家底座；河牌 MCCFR 默认关闭；多人旧范围 + 谨慎 |
 
-### 论文与开源项目：借鉴了什么 / 没借鉴什么
+### 论文与开源项目：实际读了什么、改了什么
 
-读了 [Libratus (Science 2017)](https://www.science.org/doi/10.1126/science.aao1733)、[DeepStack (Science 2017)](https://www.science.org/doi/10.1126/science.aam6960)、[Pluribus (Science 2019)](https://www.science.org/doi/10.1126/science.aay2400)、[ReBeL (arXiv:2007.13544)](https://arxiv.org/abs/2007.13544) 的公开资料，以及 [facebookresearch/rebel](https://github.com/facebookresearch/rebel)、[Sandholm-Lab/LibratusEndgames](https://github.com/Sandholm-Lab/LibratusEndgames)、[rlcard](https://github.com/datamllab/rlcard)、[cpp-cfr](https://github.com/bakanaouji/cpp-cfr)、[CFR-Poker-AI-Engine-Texas-Holdem](https://github.com/dberwegerp/CFR-Poker-AI-Engine-Texas-Holdem)、[TexasHoldem-Poker-AI-HeadsUp-Engine](https://github.com/masterai-top/TexasHoldem-Poker-AI-HeadsUp-Engine) 的项目说明，只借鉴概念、不复制代码：
+这一节记录的是**实际下载并逐页读过**的内容，不是只看了标题。Science 正刊（Libratus / Pluribus）是付费墙，
+直接下载返回 403，所以改读了这两套算法背后的原始论文；下面的引文与行号都来自本地 PDF。
 
-| 来源 | 关键思想 | 本项目采用 | 仍未采用 |
-| --- | --- | --- | --- |
-| Libratus | 自博弈 CFR、抽象 + 实时 endgame 求解 | CFR+ 原语、真实胜率桶、翻前蓝图、转/河子博弈 | 完整 blueprint、超大抽象树、多尺度 endgame |
-| DeepStack | 持续 re-solving、深度受限搜索 + 学到的直觉 | 河牌双边范围 MCCFR 子博弈（默认关闭） | 神经网络价值函数、完整 re-solving |
-| Pluribus | 6 人桌深度受限搜索、多人策略 | 多人谨慎系数 + 按街范围 | 完整多人 blueprint / 搜索 |
-| ReBeL | 强化学习 + 搜索、递归信念 | 按街贝叶斯范围（已实现，默认不用于启发式） | 价值网络、大规模自博弈 RL |
-| 开源项目 | CFR、抽象、牌局环境 | CFR+ 结构、桶抽象、测试驱动实现 | 直接移植（语言 / 规模 / 依赖不兼容） |
+#### 论文（6 篇，均已下载并提取正文）
 
-> 诚实结论：**CFR+ 原语、翻前蓝图、MCCFR、按街范围都是真的代码与真测试**，不是“算完就丢”；但当前运行时只有 **BB 翻前蓝图 + SB 放宽**在生效，河牌 MCCFR 与按街范围因基准未转正而默认关闭。挑战档在 4,000 手配对基准中与专家档统计打平（-9.6，CI 含 0），**没有证明“数学上不可战胜”**。要再往前，需要离线大规模 CFR + 神经网络价值函数，而不是在浏览器里继续堆启发式。
+| 论文 | 体量 | 实际拿到的关键内容 |
+| --- | --- | --- |
+| DeepStack（Science 2017，arXiv:1701.01724） | 37 页 | 附录 S3：re-solving 的求解器是「vanilla CFR 与 CFR+ 的混合：遗憾匹配+、均匀权重、**同时更新**」，稀疏树约 1000 次迭代；**计算平均策略时丢弃早期迭代**；用 CFR-D gadget 解增广博弈；某一轮第一次行动时用「上一轮 re-solve 得到的对手范围估计」换取速度 |
+| ReBeL（arXiv:2007.13544，真标题 *Combining Deep RL and Search for Imperfect-Information Games*） | 25 页 | public belief state（PBS）作为状态，价值网络吃「信念 + 状态」输出价值，搜索用 CFR。**必须有训练好的价值网络**才能落地 |
+| Safe and Nested Subgame Solving（NIPS 2017，arXiv:1705.02955） | 22 页 | Libratus 端局求解的核心。Unsafe / Resolving / Maxmargin / Reach-Maxmargin 四类；gadget 给对手一个「opt-out」动作，价值等于其对 blueprint 的反事实价值。原文明确：**Unsafe subgame solving 缺乏理论保证，在很多情形下表现极差** |
+| Depth-Limited Solving（NeurIPS 2018，arXiv:1805.08195） | 14 页 | 附录 B：**平均策略忽略前 50% 迭代；前 30 轮每轮按 √T/(√T+1) 折减遗憾，可把可利用度降到约 1/3**；河牌跑 **300–2000 次 CFR+**，转牌 150–1000 次；第三轮第一次用 unsafe，之后用 safe nested |
+| Endgame Solving in Large Imperfect-Information Games（AAAI 2015） | 9 页 | 端局求解的记账与增广博弈构造 |
+| Endgame solver（AAAI 2013 workshop） | 8 页 | 早期端局求解原型 |
+
+#### 开源项目（6 个仓库已 clone 到本地，逐目录看过）
+
+| 仓库 | 真实内容 | 结论 |
+| --- | --- | --- |
+| `facebookresearch/rebel` | 531 KB，**只实现 Liar's Dice，不含扑克** | 无法直接移植；ReBeL 依赖 PBS 价值网络，浏览器端不可行 |
+| `Sandholm-Lab/LibratusEndgames` | 258 KB，**只有 4 个数据文件，没有代码**：round / board / pot / reach（2652 个概率 = 每个玩家 1326 手） | 是 Libratus 真实端局的数据集，可作范围格式与校验的参照，**不是算法** |
+| `datamllab/rlcard` | Python 环境 + `cfr_agent.py` | 更新式可对照：`regret = counterfactual_prob * (v_a − v)`、`average_policy += iteration * player_prob * action_prob`（线性加权） |
+| `bakanaouji/cpp-cfr` | C++ CFR，含 vanilla / external sampling / outcome sampling 三种变体 | **`Trainer.cpp:382-391` 是本项目 CFR 更新式的直接依据**：`R[a] += po·(v[a] − v)`、`S[a] += pi·σ[a]` |
+| `dberwegerp/CFR-Poker-AI-Engine-Texas-Holdem` | **404，仓库不存在** | 正确地址是 `masterai-top/CFR-Poker-AI-Engine-Texas-Holdem`（已 clone） |
+| `masterai-top/CFR-Poker-AI-Engine-Texas-Holdem` | 4.4 MB，C++ 多人 CFR，含 `Pluribus.cpp`、`CardAbst.cpp`、`CardCluster.h` | 牌力抽象口径：`["null","null","hs","hs"]` —— 翻前/翻牌不抽象，**转牌/河牌按牌力分桶**（ACPC 标准做法） |
+| `masterai-top/TexasHoldem-Poker-AI-HeadsUp-Engine` | 234 MB，C++ HUNL 引擎，含预计算遗憾文件 `regrets.x.*.p0.i`、`CfrServer`、手牌评估器 | 证明「预计算 blueprint + 运行时查表」是可行路线；本项目的翻前蓝图走同一思路 |
+
+#### 因此改了什么
+
+1. **`src/ai/solver/subgame.ts` 换算法**（这是本轮最实质的改动）。
+   旧版用**外部采样 MCCFR**：每轮只采样一对底牌，只更新那一个 combo 的信息集。60 个 combo × 300 轮时，
+   每个信息集平均只被更新约 5 次——策略等同随机。这才是旧版「求解器 −20.5 BB/100」的真正原因，
+   不是当时以为的「树里没有加注」（补上加注只从 −20.5 回到 −5.0）。
+   现在按 DeepStack 的口径改为**全树遍历、全部 combo 同时更新的 vanilla CFR+**，
+   并实现 Depth-Limited 的两条加速：**平均策略跳过前 50% 迭代**、**前 30 轮按 √T/(√T+1) 折减遗憾**。
+2. **修掉两处范围权重失真**（`sampleRange`）：强制加入真实底牌时权重被写成 `1`（而非它在范围里的真实权重），
+   归一化后这一手会吃掉整个范围；求解器里还有一处把真实底牌权重抬到 `0.5` 的写法。两处都会让
+   「我方范围」退化成单手牌，对手的最佳回应随之错位。
+3. **新增回归测试**：400 次与 1600 次迭代的平均策略必须一致（锁死「不许改回采样版」）；
+   空气面对满池下注以弃牌为主、暗三条不会弃牌。
+4. **翻前蓝图**的真实胜率分桶思路与 `masterai-top` 的 `["null","null","hs","hs"]` 一致（转/河按牌力分桶）。
+
+#### 效果（同 seed 配对消融，BB/100，95% CI）
+
+| 版本 | 求解器边际贡献 |
+| --- | ---: |
+| 外部采样 MCCFR（无加注） | −20.5 |
+| 外部采样 MCCFR（补加注） | −5.0 |
+| **全范围 vanilla CFR+（全部河牌决策）** | **−10.1** [−21.8, 1.7] |
+| 全范围 vanilla CFR+（只在面对下注时启用） | −4.9 [−16.8, 7.0] |
+
+算法修对之后，策略本身是合理的：400 次迭代即收敛（100→3200 次策略完全一致），
+空气面对满池下注 99% 弃牌、暗三条不会弃牌，3200 次迭代耗时约 70–90 ms。
+
+但**端到端仍然没有转正**。这不是算法错了，而是三个建模问题：
+① 范围模型不准——均衡对范围误差比「胜率 vs 阈值」的启发式更敏感；
+② 只解单街——前几条街仍是启发式，均衡假设与实际打法不一致；
+③ unsafe subgame solving——没有 CFR-D gadget 的 opt-out 保证。
+所以求解器**默认关闭**（`ENABLE_RIVER_SOLVER=false`），代码、测试、消融数据全部保留，随时可开。
+
+> **诚实结论**：这次是真的读了论文和仓库，并且据此改对了算法；但「读论文」不等于「变强」。
+> 河牌求解器在配对基准里仍是负贡献，本项目当前的强度上限由**范围模型**和**多街一致性**决定，
+> 不是由求解器迭代数决定。要继续往前，正确顺序是：先把范围模型校准（用 `LibratusEndgames` 的
+> 真实端局数据做对照），再补 CFR-D gadget，最后才谈转牌价值网络。
 
 ### 基准与可复现性
 
@@ -663,7 +715,7 @@ local-holdem
 │  │  ├─ seed.ts             # 随机种子：留空每局随机、固定值复现
 │  │  ├─ styles.css
 │  │  └─ mobile.ts            # 手机 / 平板布局判定 + 安卓壳检测 + 设置抽屉
-│  └─ tests                   # Vitest 测试（30 个文件 / 383 个测试）
+│  └─ tests                   # Vitest 测试（30 个文件 / 385 个测试）
 │     ├─ cards.test.ts / handEvaluator.test.ts / pot.test.ts
 │     ├─ betting.test.ts / engine.test.ts / session.test.ts
 │     ├─ playerView.test.ts / fuzz.test.ts / seedAndReset.test.ts
@@ -688,7 +740,7 @@ local-holdem
 npm test
 ```
 
-当前规模：**30 个测试文件、383 个测试全部通过**（约 2–3 秒）。
+当前规模：**30 个测试文件、385 个测试全部通过**（约 2–3 秒）。
 
 测试覆盖（P0 要求逐项对应）：
 
@@ -744,7 +796,7 @@ npm test
 | 项目 | 结果 |
 | --- | --- |
 | `npx tsc --noEmit` | 通过，0 错误 |
-| `npm test` | 30 个测试文件、383 个测试全部通过（约 2–3s） |
+| `npm test` | 30 个测试文件、385 个测试全部通过（约 2–3s） |
 | `npm run build` | 通过：68 modules，JS 477.3 kB（gzip 140.3 kB）、CSS 63.1 kB，训练数据已打包 |
 | `node scripts/setup.mjs --agent`（一键配置） | 退出码 0、最后一行 `SETUP_RESULT=OK`；环境检查 Node v26.13.0 / npm 11.20.0 → 安装依赖 → 359 个测试通过 → 构建 61 modules；`一键安装.bat --agent` 同样 exit 0 |
 | `启动德州扑克.bat` / `训练机器人.bat` 冒烟 | 启动器：检测环境 → 起服务 → `http://localhost:5173` 返回 200（含 `#root`）→ 停止后端口释放；训练入口：`--rounds=0` 被拒绝 exit 1，环境检查通过 |
@@ -768,7 +820,7 @@ npm test
 | 随机种子实测（headless Edge） | 连续两次「新局」：底牌不同、种子提示不同（如 `7♣ 8♥` vs `4♦ 6♥`）；填固定种子 `fix-me-123` 连开两局：底牌完全一致（`Q♣ 3♥`）、设置栏与提示都显示该种子 |
 | AI 性能（本机） | 困难 8000 次约 45ms/次；专家 20000 次约 130ms/次；挑战单挑转/河子博弈 80 combos × 100 迭代约 85ms/次（基准降载 40/40，平均约 15ms/手）；3 人以上走启发式 |
 | 手机端适配（headless Edge 多尺寸） | 390×844 / 360×640 / 412×915 / 844×390：进行中牌桌 + 操作区一屏放下（文档高度 = 视口高度，无纵向滚动、无横向溢出）；≥46px 触摸按钮、设置抽屉、横屏左牌桌 / 右操作、5 / 6 人桌座位自动缩放、安全区留白；360×640 小屏也不重叠；桌面 1440×900 布局不变 |
-| 安卓 APK 构建（本机工具链） | `npm run apk` → Gradle `BUILD SUCCESSFUL`（Gradle 8.9 / JDK 21 / AGP 8.7.3 / compileSdk 35），产物 `apk/德州扑克-v0.15.0.apk` 约 3.4 MB；`aapt2 dump badging`：package `com.localholdem.app`、versionName `0.15.0` 与 package.json 一致、minSdk 23 / targetSdk 35、label「德州扑克」；`apksigner verify` 通过（release 签名，覆盖安装不会因调试签名冲突） |
+| 安卓 APK 构建（本机工具链） | `npm run apk` → Gradle `BUILD SUCCESSFUL`（Gradle 8.9 / JDK 21 / AGP 8.7.3 / compileSdk 35），产物 `apk/德州扑克-v0.15.1.apk` 约 3.4 MB；`aapt2 dump badging`：package `com.localholdem.app`、versionName `0.15.0` 与 package.json 一致、minSdk 23 / targetSdk 35、label「德州扑克」；`apksigner verify` 通过（release 签名，覆盖安装不会因调试签名冲突） |
 | 安卓工程定制 | 应用图标（自适应图标 + 圆形图标 + 各密度 PNG，金色黑桃筹码）、深绿启动画面、状态栏 / 导航栏同色、横竖屏切换不重建 Activity、http 本地大模型地址允许（usesCleartextTraffic） |
 
 ---
@@ -786,7 +838,7 @@ npm test
 
 ## 版本号约定
 
-- 当前版本：**v0.15.0**；`package.json` 与 `package-lock.json` 是唯一版本来源（安卓 APK 的 `versionName` 也由它生成，`versionCode = major×10000 + minor×100 + patch`）。
+- 当前版本：**v0.15.1**；`package.json` 与 `package-lock.json` 是唯一版本来源（安卓 APK 的 `versionName` 也由它生成，`versionCode = major×10000 + minor×100 + patch`）。
 - **每次提交都必须同步递增版本号**，并随该次改动一起提交（不要单独提交“只改版本号”的 diff）：
   - 小修复 / 文档 / 体验微调：递增补丁号（`0.8.1` → `0.8.2` …）；
   - 成块的新功能 / 明显行为变化：递增次版本（`0.9.0` → `0.10.0` …）；

@@ -120,6 +120,58 @@ describe('翻后单街子博弈 CFR+', () => {
     expect(second!.action).toEqual(first!.action);
   });
 
+  /** 构造「对手在河牌先下注」的视图（单挑：BB 先行动）。 */
+  function riverFacingBet(seed: string, hole: string, bet: number) {
+    let hand = playToStreet(
+      makeHand({
+        stacks: [1000, 1000],
+        buttonIndex: 0,
+        seed,
+        holeCards: [CC(hole), CC('Qh Jh')],
+        board: CC('2h 5s 9d Tc 3c'),
+      }),
+      'river',
+    );
+    hand =
+      hand.actingIndex === 0
+        ? playSequence(hand, [
+            [0, { type: 'check' }],
+            [1, { type: 'bet', amount: bet }],
+          ])
+        : playSequence(hand, [[1, { type: 'bet', amount: bet }]]);
+    return buildPlayerView(hand, 0, seed);
+  }
+
+  it('收敛：400 次与 1600 次迭代的平均策略一致', () => {
+    // arXiv:1805.08195 附录 B 的口径下，400 次已收敛；这里锁死这个性质，
+    // 防止有人把求解器改回「每轮只更新一手牌」的采样版本。
+    const view = riverFacingBet('subgame-converge', '9s 9c', 100);
+    const fast = solveStreetSubgame(view, { iterations: 400, maxCombos: 40 });
+    const slow = solveStreetSubgame(view, { iterations: 1600, maxCombos: 40 });
+    expect(fast).not.toBeNull();
+    expect(slow).not.toBeNull();
+    for (let index = 0; index < fast!.strategy.length; index++) {
+      expect(Math.abs(fast!.strategy[index] - slow!.strategy[index])).toBeLessThan(0.06);
+    }
+  });
+
+  it('面对满池下注：空气以弃牌为主，暗三条不会弃牌', () => {
+    const air = solveStreetSubgame(riverFacingBet('subgame-air', '7c 2d', 100), {
+      iterations: 800,
+      maxCombos: 40,
+    });
+    const set = solveStreetSubgame(riverFacingBet('subgame-set', '9s 9c', 100), {
+      iterations: 800,
+      maxCombos: 40,
+    });
+    expect(air).not.toBeNull();
+    expect(set).not.toBeNull();
+    const foldIndex = air!.actions.indexOf('fold');
+    expect(foldIndex).toBeGreaterThanOrEqual(0);
+    expect(air!.strategy[foldIndex]).toBeGreaterThan(0.7);
+    expect(set!.strategy[foldIndex]).toBeLessThan(0.1);
+  });
+
   it('多人底池不套单挑子博弈', () => {
     const hand = playToStreet(
       makeHand({
