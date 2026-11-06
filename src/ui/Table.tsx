@@ -199,7 +199,7 @@ export function Table({
       : '本手结束';
 
   return (
-    <section className="table-panel" aria-label="牌桌">
+    <section className="table-panel" aria-label="牌桌" data-players={table.players.length}>
       <div className="table-toolbar">
         <div className="table-toolbar__left">
           <span className="table-chip">第 {table.handNo} 手</span>

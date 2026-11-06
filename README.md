@@ -14,6 +14,7 @@
 - **真人化决策**：机器人有跨手公开统计（VPIP / PFR / 攻击性 / 面对下注弃牌率）、情绪（手感 / 上头）与按难度分级的真人式失误；困难 / 专家会读对手统计并选更优下注尺度，座位显示跨手画像，调试面板标注「读对手 / 手感 / 真人式失误」。
 - **一键同步数据**：升级新版本时双击「一键同步数据」，自动找到旁边的旧版本并把训练参数、大模型经验库、训练报告同步过来（覆盖前自动备份到 `backup/`）；浏览器里的设置与大模型记忆同浏览器同端口自动沿用。
 - **自博弈训练**：`npm run train` / 双击 `训练机器人.bat`（交互式：先问训练轮数 → 给出预计时间 → 确认后开始），同时训练规则引擎机器人（四档参数进化）与大模型机器人（few-shot 经验库 + 可选微调 SFT 数据集）。
+- **手机 / 安卓 APK**：界面已完成手机适配（竖屏 / 横屏一屏完成「看牌桌 → 点按钮」、设置抽屉、≥46px 触摸目标、安全区、5/6 人桌座位自动缩放），并提供 `npm run apk` / `一键打包APK.bat` 一键打包**安卓安装包**（`apk/` 目录，release 签名，可直接安装）。
 - 只使用虚拟筹码，不含真钱、充值、提现等任何功能。
 
 ## 界面预览
@@ -25,6 +26,14 @@
 **新手教程（6 页：牌型表、位置顺序、操作、界面导览、AI 与大模型、训练）**
 
 ![新手教程](docs/tutorial.png)
+
+**手机端（390×844 竖屏）：大厅 / 牌桌 / 设置抽屉**
+
+| 大厅 | 牌桌 | 设置抽屉 |
+| --- | --- | --- |
+| ![手机大厅](docs/mobile-lobby.png) | ![手机牌桌](docs/mobile-table.png) | ![手机设置](docs/mobile-settings.png) |
+
+手机端交互要点：顶部「设置」按钮把原本很高的设置栏收进抽屉；进行中的牌桌用整屏布局，牌桌 + 6 个动作按钮 + 下注滑块一屏放下；横屏自动切换为「左牌桌 / 右操作」两栏；按钮按下有缩放反馈，输入框 ≥16px 避免聚焦放大。
 
 ---
 
@@ -73,6 +82,38 @@ npm test         # 运行全部单元 / 集成测试
 npm run build    # TypeScript 类型检查 + 生产构建（输出 dist/）
 ```
 
+### 方式四：手机 / 安卓 APK（推荐在手机上玩）
+
+**A. 直接安装 APK（安卓手机）**
+
+- 安装包就在项目的 **`apk/`** 目录里（当前 `apk/德州扑克-v0.14.0.apk`，约 3.4 MB，只使用虚拟筹码、默认不联网）。
+- 传到手机：微信 / QQ 发给自己的「文件传输助手」→ 手机点开文件；或用 USB 数据线拷到手机 → 用文件管理器点击安装。
+- 首次安装会提示「禁止安装未知应用」：在手机上允许文件管理器 / 浏览器的「安装未知应用」权限即可；支持 Android 6.0（API 23）及以上。
+- **以后升级**：把新版本 APK 传到手机**直接覆盖安装**即可（同一签名，设置不丢）；卸载重装会清空应用里保存的大模型设置 / 记忆。
+- 应用内「导出历史」无法像浏览器那样下载文件，会改为把牌局 JSON **复制到剪贴板**，粘贴到备忘录或聊天窗口保存。
+
+**B. 自己重新打包 APK（改代码后）**
+
+Windows 双击 **`一键打包APK.bat`**，或命令行：
+
+```bash
+npm run apk          # 生产签名 release APK → apk/德州扑克-v<版本号>.apk
+npm run apk:debug    # debug 包（排查用）
+```
+
+构建要求（本机已预装，也可换用自己的路径）：
+
+- **JDK 21+**：Capacitor 7 的安卓库按 Java 21 编译，只有 JDK 17 会报 `invalid source release: 21`；
+- **Android SDK**：platform android-35 + build-tools 35（用 `ANDROID_HOME` 指定）；
+- **Gradle 8.9**：首次构建自动下载，之后走本机缓存；
+- 脚本自动执行 `npm run build` → `npx cap sync android` → 在纯 ASCII 构建目录（默认 `C:\AndroidToolchain\apk-build`）里 Gradle 打包 → 把 APK 复制回 `apk/`。**本项目路径含中文，AGP 不允许直接在 `D:\德州扑克\android` 构建，所以会先复制到 ASCII 目录**；可用 `HOLDEM_APK_BUILD_DIR` / `HOLDEM_JDK` / `HOLDEM_KEYSTORE_DIR` 覆盖默认路径；
+- 签名：首次构建在 `C:\AndroidToolchain\keystore\local-holdem-release.jks` 生成发布密钥并在后续复用（保证覆盖安装），该文件不进仓库；也可以 `npx cap open android` 用 Android Studio 构建。
+
+**C. 手机浏览器直接玩（不装 APK）**
+
+- 电脑运行 `npm run dev -- --host 0.0.0.0`，手机和电脑连同一个 Wi-Fi，手机浏览器打开 `http://<电脑局域网 IP>:5173`（电脑需保持开机，仅局域网内可访问）；
+- 也可以把 `dist/` 部署到任意静态服务器，用手机浏览器访问（游戏仍是纯前端运行）。
+
 ### 从旧版本升级（之前已经装过旧版本）
 
 **不需要重新跑一遍「一键安装」，也不需要在系统里重新安装 Node.js。** 分两种情况：
@@ -106,7 +147,7 @@ npm run build    # TypeScript 类型检查 + 生产构建（输出 dist/）
 - **想留档**：升级前点设置栏「导出历史」，会把当前配置 + 全部手牌历史导出成 JSON 下载到本地（目前只支持导出，没有「导入回游戏」；可用于归档或自己分析）。导出的文件在下载目录，不受升级影响。
 - **自己训练出的参数**（如果你训练过）：`src/ai/data/learnedProfiles.json`、`src/ai/data/llm-experience.json` 与 `training/` 保存在**项目文件夹**里。解压到新文件夹时，新包自带的是发布时的训练产物；想保留自己的成果，升级前先备份，解压后拷到新目录对应位置。⚠️ 覆盖解压到旧文件夹时，新包里的同名文件会覆盖你训练过的文件，务必先备份。
 
-> 每个版本的版本号见 `package.json` 的 `version` 字段（当前为 v0.4.x）。
+> 每个版本的版本号见 `package.json` 的 `version` 字段（当前为 v0.14.x）。
 
 ### 交给 AI Agent 安装
 
@@ -532,16 +573,21 @@ local-holdem
 ├─ 启动德州扑克.bat              # Windows 一键启动（自动装依赖 + 开浏览器）
 ├─ 启动德州扑克.command / .sh    # macOS 双击 / macOS+Linux 终端 一键启动
 ├─ 训练机器人.bat                # Windows 交互式训练（先问轮数/估时/确认）
+├─ 一键打包APK.bat              # Windows 一键打包安卓 APK（需要 JDK 21 + Android SDK 35）
 ├─ 一键同步数据.bat              # Windows 一键同步旧版本数据（训练参数 / 经验库 / 训练产物）
 ├─ 一键同步数据.command / .sh    # macOS 双击 / macOS+Linux 终端 一键同步旧版本数据
 ├─ AGENTS.md                     # 给 AI Agent / 自动化工具的安装与验收说明
 ├─ .gitignore / .gitattributes   # 不提交 node_modules、dist；统一换行符
 ├─ index.html
+├─ capacitor.config.json         # Capacitor 安卓壳配置（appId / 应用名 / dist）
 ├─ package.json
 ├─ tsconfig.json
 ├─ vite.config.ts
 ├─ README.md
-├─ docs/                        # 界面截图
+├─ docs/                        # 界面截图（桌面 + 手机）
+├─ android/                     # Capacitor 安卓工程（图标 / 启动图 / 主题已定制）
+├─ apk/                         # 构建出的安卓安装包（只保留当前版本）
+├─ public/                      # 应用图标与 PWA manifest
 ├─ training/
 │  ├─ REPORT.md                 # 最近一次自博弈训练报告
 │  └─ llm-sft-dataset.jsonl     # 大模型机器人可选微调数据集（JSONL）
@@ -550,6 +596,7 @@ local-holdem
 │  ├─ sync-data.mjs             # 一键同步旧版本数据（训练参数 / 经验库 / 训练产物，覆盖前备份）
 │  ├─ install-node.ps1          # Windows：检测/下载/安装官方 Node.js LTS（Ask/Auto/Check）
 │  ├─ launcher-common.sh        # macOS/Linux：检测 Node.js，缺失时官方 pkg 自动安装（可用 Homebrew 备选）
+│  ├─ build-apk.mjs             # 一键打包安卓 APK（Web 构建 → cap sync → Gradle → apk/）
 │  └─ train.ts                  # 自博弈训练 + 参数进化 + 经验库 / SFT 生成
 ├─ src
 │  ├─ main.tsx
@@ -597,8 +644,9 @@ local-holdem
 │  │  ├─ useAiDriver.ts       # AI / 大模型回合驱动（竞态防护、失败兜底）
 │  │  ├─ llmSettings.ts / storage.ts / handMemory.ts / format.ts / types.ts
 │  │  ├─ seed.ts             # 随机种子：留空每局随机、固定值复现
-│  │  └─ styles.css
-│  └─ tests                   # Vitest 测试（28 个文件 / 359 个测试）
+│  │  ├─ styles.css
+│  │  └─ mobile.ts            # 手机 / 平板布局判定 + 安卓壳检测 + 设置抽屉
+│  └─ tests                   # Vitest 测试（29 个文件 / 371 个测试）
 │     ├─ cards.test.ts / handEvaluator.test.ts / pot.test.ts
 │     ├─ betting.test.ts / engine.test.ts / session.test.ts
 │     ├─ playerView.test.ts / fuzz.test.ts / seedAndReset.test.ts
@@ -607,8 +655,9 @@ local-holdem
 │     ├─ llmSettings.test.ts / llmSeats.test.ts / llmDetect.test.ts
 │     ├─ learnedProfiles.test.ts / trainer.test.ts（11 个训练测试）
 │     ├─ syncData.test.ts（11 个一键同步测试）
-│     ├─ challenge.test.ts（22 个挑战宗师测试）
+│     ├─ challenge.test.ts（23 个挑战宗师测试）
 │     ├─ gto.test.ts（21 个 GTO / 纳什近似 + 搜索测试）
+│     ├─ mobile.test.ts（12 个手机布局 / 安卓壳测试）
 │     └─ integration.test.ts
 ```
 
@@ -620,7 +669,7 @@ local-holdem
 npm test
 ```
 
-当前规模：**28 个测试文件、359 个测试全部通过**（约 1–2 秒）。
+当前规模：**29 个测试文件、371 个测试全部通过**（约 2–3 秒）。
 
 测试覆盖（P0 要求逐项对应）：
 
@@ -645,6 +694,7 @@ npm test
 - **GTO / 纳什近似**：MDF / 诈唬比例 α / 价值诈唬比 / 底池赔率临界公式；难度均衡接近度严格递增且挑战最高；临界跟弃混合与平衡诈唬；阈值 CFR push/fold 解（频率合法、强牌更常推 / 跟、单调边际、可利用度随迭代下降）；单挑短码建议与深筹码 / 多人桌不触发；挑战模式 debug 带 `GTO 92%` / `搜索` 标记；EV softmax 尺度混合。
 - **深度受限搜索 / 多人谨慎**：多人谨慎系数随人数递减；强牌搜索优先进攻、弱牌面对大注优先弃牌；搜索结果确定且 EV 降序；`estimateActionEv` 与搜索口径一致；搜索接入挑战决策后仍然合法。
 - **一键同步数据**：按 package.json 识别旧版本目录、扫描同级与嵌套目录、候选按数据时间排序、复制与覆盖前备份、内容相同跳过、dry-run 不写文件、参数解析与文件大小格式化。
+- **手机端 / 安卓**：手机 / 平板 / 桌面布局断点判定、手机默认收起设置栏、横屏小屏判定、非法尺寸兜底、Capacitor 安卓壳检测（普通浏览器安全返回 false）。
 
 ---
 
@@ -667,14 +717,16 @@ npm test
 - [x] README 写明启动命令、规则选择（含 50% 规则选择）、难度说明、已知限制
 - [x] 无真钱、充值、提现；除用户自己配置的本地模型地址外无外部 API
 - [x] P1：可复现种子、牌局历史导出、AI 调试面板、简单回放、2–6 人可配置
+- [x] 手机端适配：竖屏 / 横屏都能一屏完成「看牌桌 → 点按钮」，设置抽屉、安全区、≥46px 触摸目标、无横向溢出
+- [x] 安卓 APK：`npm run apk` 构建 release 签名包，`apk/德州扑克-v<version>.apk` 可直接安装，versionName 与 package.json 同步
 
 ### 本机验收记录
 
 | 项目 | 结果 |
 | --- | --- |
 | `npx tsc --noEmit` | 通过，0 错误 |
-| `npm test` | 28 个测试文件、359 个测试全部通过（约 1–2s） |
-| `npm run build` | 通过：62 modules，JS 465.24 kB（gzip 136.21 kB）、CSS 51.64 kB，训练数据已打包 |
+| `npm test` | 29 个测试文件、371 个测试全部通过（约 2–3s） |
+| `npm run build` | 通过：68 modules，JS 477.3 kB（gzip 140.3 kB）、CSS 63.1 kB，训练数据已打包 |
 | `node scripts/setup.mjs --agent`（一键配置） | 退出码 0、最后一行 `SETUP_RESULT=OK`；环境检查 Node v26.13.0 / npm 11.20.0 → 安装依赖 → 359 个测试通过 → 构建 61 modules；`一键安装.bat --agent` 同样 exit 0 |
 | `启动德州扑克.bat` / `训练机器人.bat` 冒烟 | 启动器：检测环境 → 起服务 → `http://localhost:5173` 返回 200（含 `#root`）→ 停止后端口释放；训练入口：`--rounds=0` 被拒绝 exit 1，环境检查通过 |
 | macOS / Linux 启动脚本（Git Bash 5.3 冒烟） | 4 个 `.sh` / `.command` 语法检查通过（兼容 macOS 自带 bash 3.2）；`bash 一键安装.sh --agent` exit 0、输出 `SETUP_RESULT=OK`；`bash 启动德州扑克.sh --no-open` 起服务返回 200 后停止；安装后输入 `n` 正确跳过启动；`.command` 已在 git 索引标记可执行位 |
@@ -695,7 +747,10 @@ npm test
 | 本机大模型自动探测（mock 服务） | headless Edge 实测：打开「AI 玩家设置」后自动发现 Ollama / OpenAI 兼容服务与模型名，一键新增大模型玩家并填入成功；无服务时中文提示、页面不崩溃 |
 | `npm run dev` + headless Edge 实测 | 首次自动教程 → 不自动发牌 → 关闭后大厅 → 开始对局；教程分页与末页开局；大模型座位显示 🤖+LLM；mock 本地模型决策与调试面板正常；停掉模型服务后自动回退本地算法并继续牌局；无 console 报错（已修 favicon 404） |
 | 随机种子实测（headless Edge） | 连续两次「新局」：底牌不同、种子提示不同（如 `7♣ 8♥` vs `4♦ 6♥`）；填固定种子 `fix-me-123` 连开两局：底牌完全一致（`Q♣ 3♥`）、设置栏与提示都显示该种子 |
-| AI 性能（本机） | 困难 8000 次约 45ms/次；专家 20000 次约 130ms/次 |
+| AI 性能（本机） | 困难 8000 次约 45ms/次；专家 20000 次约 130ms/次；挑战宗师完整决策（MC 30000 + 搜索）平均 53ms / p95 242ms |
+| 手机端适配（headless Edge 多尺寸） | 390×844 / 360×640 / 412×915 / 844×390：进行中牌桌 + 操作区一屏放下（文档高度 = 视口高度，无纵向滚动、无横向溢出）；≥46px 触摸按钮、设置抽屉、横屏左牌桌 / 右操作、5 / 6 人桌座位自动缩放、安全区留白；360×640 小屏也不重叠；桌面 1440×900 布局不变 |
+| 安卓 APK 构建（本机工具链） | `npm run apk` → Gradle `BUILD SUCCESSFUL`（Gradle 8.9 / JDK 21 / AGP 8.7.3 / compileSdk 35），产物 `apk/德州扑克-v0.14.0.apk` 约 3.4 MB；`aapt2 dump badging`：package `com.localholdem.app`、versionName `0.14.0` 与 package.json 一致、minSdk 23 / targetSdk 35、label「德州扑克」；`apksigner verify` 通过（release 签名，覆盖安装不会因调试签名冲突） |
+| 安卓工程定制 | 应用图标（自适应图标 + 圆形图标 + 各密度 PNG，金色黑桃筹码）、深绿启动画面、状态栏 / 导航栏同色、横竖屏切换不重建 Activity、http 本地大模型地址允许（usesCleartextTraffic） |
 
 ---
 
@@ -712,18 +767,19 @@ npm test
 
 ## 版本号约定
 
-- 当前版本：**v0.8.0**；`package.json` 与 `package-lock.json` 是唯一版本来源。
+- 当前版本：**v0.14.0**；`package.json` 与 `package-lock.json` 是唯一版本来源（安卓 APK 的 `versionName` 也由它生成，`versionCode = major×10000 + minor×100 + patch`）。
 - **每次提交都必须同步递增版本号**，并随该次改动一起提交（不要单独提交“只改版本号”的 diff）：
   - 小修复 / 文档 / 体验微调：递增补丁号（`0.8.1` → `0.8.2` …）；
   - 成块的新功能 / 明显行为变化：递增次版本（`0.9.0` → `0.10.0` …）；
   - 提交信息带上版本号，例如 `feat: xxx (v0.8.1)`。
 - 1.0.0 之前视为开发版，不保证 API / 数据格式稳定；1.0.0 起再按语义化版本（破坏性改动升主版本）执行。
+- **每次版本更新都要同步重新打包 APK**：执行 `npm run apk`，把 `apk/` 里旧版本文件替换为新版本（只保留当前版本），并与代码改动一起提交；只改文档 / 无安卓变动的补丁版本也建议顺手重打一次，保证 `apk/` 与 `package.json` 版本号一致。
 
 ---
 
 ## 上传 / 分享到 GitHub
 
-仓库已准备好 `.gitignore`（不提交 `node_modules/`、`dist/` 等）与 `.gitattributes`（统一换行符），源码 + 截图 + 训练产物约 1.7 MB，可直接托管。首次上传（把 `<你的用户名>` / `<仓库名>` 换成实际值）：
+仓库已准备好 `.gitignore`（不提交 `node_modules/`、`dist/`、`android/build/` 等）与 `.gitattributes`（统一换行符），源码 + 截图 + 安卓工程 + 训练产物 + 当前 APK 约 7 MB，可直接托管。首次上传（把 `<你的用户名>` / `<仓库名>` 换成实际值）：
 
 ```bash
 git init -b main
@@ -745,7 +801,7 @@ git remote add origin https://github.com/<你的用户名>/<仓库名>.git
 
 ## 已知限制
 
-- 桌面浏览器优先（建议宽度 ≥ 1200px；1440×900 下页面需少量纵向滚动，人类行动时操作区会自动滚入视野），未专门适配手机触摸布局。
+- 桌面端建议宽度 ≥ 1200px（1440×900 下人类行动时操作区会自动滚入视野）；手机已适配竖屏 / 横屏，但极窄屏（< 340px）、系统超大字体或分屏模式下仍可能需要滚动。
 - macOS / Linux 提供 `.command` / `.sh` 启动器，功能与 Windows `.bat` 一致；本项目主要在 Windows 上验证，macOS / Linux 如遇浏览器未自动打开，手动访问 http://localhost:5173 即可，游戏功能不受影响。
 - **自动安装 Node.js 的限制**：需要联网和本机管理员权限（Windows 会弹 UAC，macOS 要输入登录密码），公司电脑 / 标准用户可能被策略拦截，失败时会自动回退到手动安装指引；Node.js 只在本机确实没有时才安装，已有则跳过、不会覆盖或升级旧版本（版本过低时请手动升级）；Linux 因发行版差异暂不自动安装。
 - 本地大模型机器人需要你自行部署（或使用外部兼容接口）并开启 CORS；模型质量、速度、上下文长度直接影响决策质量，默认超时 60 秒，失败会回退本地算法。自动探测只扫描常见端口且要求服务允许 CORS，扫不到时请手动填写 Base URL。
@@ -765,6 +821,9 @@ git remote add origin https://github.com/<你的用户名>/<仓库名>.git
 - 兜底规则解释：盲注不足全下时，实际入池筹码参与边池层级；面对小于大盲的短全下，最小加注按补足一个大盲处理。
 - 无音效、无动画、无多语言；牌局数据仅存内存（可导出 JSON）；刷新页面会丢失当前牌局，但大模型记忆/设置/训练开关保留。
 - AI 决策没有额外超时看门狗；异常或非法动作会自动回退安全动作。
+- **安卓 APK**：自签名 release 包，未上架应用商店，只支持 Android 6.0+（minSdk 23）。换签名（如换电脑重新生成密钥）后需要先卸载旧版再装，会清空应用内 localStorage（大模型设置 / 记忆 / 训练开关）；牌局数据本来就只在内存里。安卓应用内无法下载文件，「导出历史」改为复制 JSON 到剪贴板。
+- **手机性能**：挑战宗师单次决策本机平均 53ms / p95 242ms（MC 30000 + 搜索），低端机上可能到数百 ms～1 秒；期间有思考动画、不会阻塞操作，嫌慢可降低难度或放慢速度。
+- 重新构建 APK 需要 JDK 21 + Android SDK 35（脚本已内置本机默认路径）；仓库不提交 `node_modules/`、`android/app/build/`、签名密钥等产物。
 - 仅虚拟筹码，不涉及任何真钱、充值、提现或外部付费服务。
 
 ---

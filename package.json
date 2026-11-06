@@ -1,7 +1,7 @@
 {
   "name": "local-holdem",
   "private": true,
-  "version": "0.13.1",
+  "version": "0.14.0",
   "description": "本地人机无限注德州扑克：纯前端规则引擎 + 本地算法 AI，零网络、零付费服务",
   "type": "module",
   "scripts": {
@@ -13,9 +13,13 @@
     "train": "tsx scripts/train.ts",
     "train:quick": "tsx scripts/train.ts --quick",
     "sync:data": "node scripts/sync-data.mjs",
-    "gto:tables": "tsx scripts/generate-gto-tables.ts"
+    "gto:tables": "tsx scripts/generate-gto-tables.ts",
+    "apk": "node scripts/build-apk.mjs",
+    "apk:debug": "node scripts/build-apk.mjs --debug"
   },
   "dependencies": {
+    "@capacitor/android": "^7.6.10",
+    "@capacitor/core": "^7.6.10",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },
@@ -23,6 +27,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.2.1",
+    "@capacitor/cli": "^7.6.10",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vite": "^8.3.5",

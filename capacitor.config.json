@@ -1,0 +1,9 @@
+{
+  "appId": "com.localholdem.app",
+  "appName": "德州扑克",
+  "webDir": "dist",
+  "android": {
+    "allowMixedContent": true,
+    "adjustMarginsForEdgeToEdge": "auto"
+  }
+}

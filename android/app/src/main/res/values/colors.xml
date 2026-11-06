@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 与 Web 端深绿 +金色 的视觉一致 -->
+    <color name="colorPrimary">#0b3d2e</color>
+    <color name="colorPrimaryDark">#071511</color>
+    <color name="colorAccent">#e8c977</color>
+    <color name="splash_background">#071511</color>
+    <color name="status_bar">#071511</color>
+</resources>

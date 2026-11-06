@@ -43,6 +43,7 @@ import {
   saveLearnedProfilesEnabled,
 } from './storage';
 import { recordLlmHandMemories } from './handMemory';
+import { isCapacitorNative, settingsCollapsedByDefault, useLayoutMode } from './mobile';
 import { describeSeed, resolveSeed } from './seed';
 
 interface BootState {
@@ -100,6 +101,9 @@ export function App() {
   );
   /** 大模型玩家的神态/语句气泡：玩家 id → 文本（自动消失）。 */
   const [talkBubbles, setTalkBubbles] = useState<Record<number, string>>({});
+  /** 手机端设置抽屉是否展开；桌面端设置栏始终显示。 */
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const layout = useLayoutMode();
 
   /** 换局 / 改难度 / 人类行动时递增，用于作废在途的 AI 决策。 */
   const epochRef = useRef(0);
@@ -170,6 +174,11 @@ export function App() {
   useEffect(() => {
     setTalkBubbles({});
   }, [table.handNo, table.phase]);
+
+  // 手机端默认收起设置栏（桌面端自动展开）；窗口尺寸变化时同步。
+  useEffect(() => {
+    setSettingsOpen(!settingsCollapsedByDefault(layout));
+  }, [layout]);
 
   // 训练后参数默认开启（检测到训练产物时）；切换立即生效。
   useEffect(() => {
@@ -265,6 +274,7 @@ export function App() {
       setTable(next);
       setDebugRecords([]);
       setHistoryOpen(false);
+      setSettingsOpen(false);
       showNotice(
         'info',
         `新牌局已开始：${settings.playerCount} 人 · 盲注 10/20 · ${
@@ -290,6 +300,7 @@ export function App() {
       epochRef.current += 1;
       setTable(next);
       setNotice(null);
+      setSettingsOpen(false);
     } catch (error) {
       showNotice('error', `无法开始下一手：${getErrorMessage(error)}`);
     }
@@ -310,9 +321,23 @@ export function App() {
     }
   }, [table, settings.seed, showNotice]);
 
-  const handleExport = useCallback(() => {
+  const handleExport = useCallback(async () => {
     if (table.history.length === 0) {
       showNotice('info', '还没有可导出的历史牌局，先完整打完一手吧。');
+      return;
+    }
+    // 安卓 APK 的 WebView 不支持 a[download] 下载文件：改为把 JSON 复制到剪贴板。
+    if (isCapacitorNative()) {
+      try {
+        const json = exportHistory(table);
+        await navigator.clipboard.writeText(json);
+        showNotice(
+          'info',
+          `安卓应用内无法直接下载文件，已把 ${table.history.length} 手牌局 JSON 复制到剪贴板，粘贴到备忘录或聊天窗口即可保存。`,
+        );
+      } catch {
+        showNotice('error', '安卓应用内无法直接下载文件，复制到剪贴板也失败了；请在电脑浏览器里导出。');
+      }
       return;
     }
     try {
@@ -403,8 +428,16 @@ export function App() {
   const potText =
     table.hand && table.phase === 'playing' ? formatChips(table.hand.pot) : '—';
 
+  /** 发牌中 / 本手结束用整屏布局：牌桌与操作区一屏放下（手机端尤其重要）。 */
+  const inGame = table.phase === 'playing' || table.phase === 'handOver';
+
   return (
-    <div className="app-shell">
+    <div
+      className={`app-shell${inGame ? ' app-shell--ingame' : ''}${
+        table.phase === 'idle' ? ' app-shell--idle' : ''
+      }`}
+      data-layout={layout}
+    >
       <header className="app-header">
         <div className="brand">
           <span className="brand__mark" aria-hidden="true">
@@ -435,27 +468,54 @@ export function App() {
             <span className="stat__value stat__value--gold">{potText}</span>
           </div>
         </div>
+        <button
+          type="button"
+          className="mobile-settings-toggle"
+          aria-expanded={settingsOpen}
+          aria-controls="settings-shell"
+          onClick={() => setSettingsOpen((open) => !open)}
+        >
+          <span className="mobile-settings-toggle__icon" aria-hidden="true">
+            ⚙
+          </span>
+          {settingsOpen ? '收起设置' : '设置'}
+        </button>
       </header>
 
-      <SettingsBar
-        settings={settings}
-        table={table}
-        onChange={handleSettingsChange}
-        onNewGame={startGame}
-        onNextHand={handleNextHand}
-        onResetChips={handleResetChips}
-        onExport={handleExport}
-        onOpenTutorial={openTutorial}
-        onOpenLlmSettings={openLlmSettings}
-        llmEnabledCount={llmSeatConfigs.length}
-        learnedAvailable={learnedAvailable}
-        learnedEnabled={learnedEnabled}
-        onToggleLearned={handleToggleLearned}
-        tableTalk={llmSettings.tableTalk}
-        onToggleTableTalk={handleToggleTableTalk}
-        advisorEnabled={llmSettings.advisor.enabled}
-        onToggleAdvisor={handleToggleAdvisor}
+      <div
+        id="settings-shell"
+        className={`settings-shell${settingsOpen ? ' settings-shell--open' : ''}`}
+      >
+        <div className="settings-sheet-head">
+          <span className="settings-sheet-head__title">牌局设置</span>
+          <button
+            type="button"
+            className="btn btn--ghost btn--sm"
+            onClick={() => setSettingsOpen(false)}
+          >
+            收起
+          </button>
+        </div>
+        <SettingsBar
+          settings={settings}
+          table={table}
+          onChange={handleSettingsChange}
+          onNewGame={startGame}
+          onNextHand={handleNextHand}
+          onResetChips={handleResetChips}
+          onExport={handleExport}
+          onOpenTutorial={openTutorial}
+          onOpenLlmSettings={openLlmSettings}
+          llmEnabledCount={llmSeatConfigs.length}
+          learnedAvailable={learnedAvailable}
+          learnedEnabled={learnedEnabled}
+          onToggleLearned={handleToggleLearned}
+          tableTalk={llmSettings.tableTalk}
+          onToggleTableTalk={handleToggleTableTalk}
+          advisorEnabled={llmSettings.advisor.enabled}
+          onToggleAdvisor={handleToggleAdvisor}
       />
+      </div>
 
       <main className="app-main">
         <div className="table-column">
