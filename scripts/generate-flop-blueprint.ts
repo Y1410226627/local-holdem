@@ -298,7 +298,14 @@ const payload = {
   bucketWeights,
   bucketBoards: bucketBoards.map((board) => board.map((card) => `${card.rank}${card.suit}`)),
   nodes: blueprint.nodes,
-  entries: blueprint.entries,
+  // 策略量化成 0~100 的整数（加载时除以 strategyScale）：
+  // 浮点原始值每个要占 10+ 个字符，量化后只占 1~3 个，文件从 1.2MB 降到 ~0.6MB。
+  // 精度损失 0.5% 对混合频率没有实际影响（决策本来就是按频率抽样）。
+  strategyScale: 100,
+  entries: blueprint.entries.map((entry) => ({
+    ...entry,
+    strategy: entry.strategy.map((value) => Math.round(value * 100)),
+  })),
 };
 const out = 'src/ai/data/flop-blueprint.json';
 writeFileSync(out, JSON.stringify(payload), 'utf8');

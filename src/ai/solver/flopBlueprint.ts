@@ -397,6 +397,8 @@ export function solveFlopBlueprint(input: FlopSolveInput): FlopBlueprint {
 interface BlueprintFile {
   /** 生成时的手牌桶数；与运行时不一致说明数据过期，必须拒绝使用。 */
   handBuckets?: number;
+  /** 策略值的量化倍数（100 = 存的是 0~100 的整数）；缺省 1 表示原始浮点。 */
+  strategyScale?: number;
   textureKeys: string[];
   bucketBoards: string[][];
   nodes: Record<string, FlopActionName[]>;
@@ -435,9 +437,13 @@ function loadBlueprint(): typeof loaded {
       if (!coarseToBucket.has(coarse)) coarseToBucket.set(coarse, index);
       if (!roughestToBucket.has(roughest)) roughestToBucket.set(roughest, index);
     });
+    const scale = raw.strategyScale ?? 1;
     const strategy = new Map<string, number[]>();
     for (const entry of raw.entries) {
-      strategy.set(`${entry.node}|${entry.flop}|${entry.hand}`, entry.strategy);
+      strategy.set(
+        `${entry.node}|${entry.flop}|${entry.hand}`,
+        scale === 1 ? entry.strategy : entry.strategy.map((value) => value / scale),
+      );
     }
     loaded = { keyToBucket, coarseToBucket, roughestToBucket, nodes: raw.nodes, strategy };
     return loaded;
