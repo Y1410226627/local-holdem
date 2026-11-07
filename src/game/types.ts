@@ -86,6 +86,15 @@ export interface PublicPlayerStats {
   vpipRate: number;
   /** 翻牌前加注率 0..1。 */
   pfrRate: number;
+  /**
+   * 「有加注机会时」的翻牌前加注率 0..1。
+   *
+   * 和 pfrRate 的区别：pfrRate 的分母是**所有手牌**，包含他根本没轮到动作的手
+   * （比如大盲位前面全弃牌）。所以一个「每轮到我加注我就加」的疯子，pfrRate 也只有 75%，
+   * 会被误判成「前 75% 范围」，进而低估他全下时的范围宽度（实测把 Q9o 的权益
+   * 从真实的 55.1% 估成 45%，该跟的牌全弃了）。这个字段的分母只算他真正行动过的手。
+   */
+  pfrOpportunityRate?: number;
   /** 攻击性 (下注 + 加注) / 跟注，0..5。 */
   aggression: number;
   /** 面对下注时的弃牌率 0..1；样本不足为 null。 */
@@ -105,6 +114,8 @@ export interface PlayerStatsRaw {
   hands: number;
   vpip: number;
   pfr: number;
+  /** 翻牌前真正行动过的手数（pfrOpportunityRate 的分母）。 */
+  pfrOpps: number;
   bets: number;
   raises: number;
   calls: number;

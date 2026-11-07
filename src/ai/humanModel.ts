@@ -21,6 +21,8 @@ export interface OpponentSummary {
   /** 平均 VPIP / PFR / 攻击性 / 面对下注弃牌率（无样本为 null）。 */
   avgVpip: number | null;
   avgPfr: number | null;
+  /** 平均「有加注机会时的加注率」（分母只算真正行动过的手，比 avgPfr 高）。 */
+  avgPfrOpportunity?: number | null;
   avgAggression: number | null;
   avgFoldToBet: number | null;
   /** 0..1 置信度（按平均手数）。 */
@@ -83,6 +85,7 @@ export function summarizeOpponents(view: PlayerView): OpponentSummary {
     count: withStats.length,
     avgVpip: avg((stats) => stats.vpipRate),
     avgPfr: avg((stats) => stats.pfrRate),
+    avgPfrOpportunity: avg((stats) => stats.pfrOpportunityRate ?? stats.pfrRate),
     avgAggression: avg((stats) => stats.aggression),
     avgFoldToBet: folds.length > 0 ? folds.reduce((sum, rate) => sum + rate, 0) / folds.length : null,
     confidence: clamp(avgHands / 8, 0, 1),

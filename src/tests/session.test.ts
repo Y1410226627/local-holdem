@@ -8,6 +8,7 @@ import {
   resetChips,
   setTableDifficulty,
   startNextHand,
+  toPublicStats,
 } from '../game/stateMachine';
 import { getLegalActions } from '../game/gameEngine';
 import type { TableState } from '../game/types';
@@ -239,5 +240,43 @@ describe('会话：难度、重置、历史导出', () => {
     expect(a.players.map((player) => player.stack)).toEqual(
       b.players.map((player) => player.stack),
     );
+  });
+});
+
+describe('加注机会率（pfrOpportunityRate）：分母只算「真正行动过」的手', () => {
+  it('每手轮到自己就加注的玩家：pfrRate < 1，但 pfrOpportunityRate = 1', () => {
+    let table = createTable({ playerCount: 2, startingStack: 1000, smallBlind: 10, bigBlind: 20, seed: 'pfr-opp' });
+    // 座位 0 永远弃牌 / 过牌，座位 1 一有机会就加注
+    for (let h = 0; h < 12; h++) {
+      table.players = table.players.map((p) => ({ ...p, stack: 1000 }));
+      table.phase = 'handOver';
+      table = startNextHand(table);
+      let guard = 0;
+      while (table.phase === 'playing' && guard++ < 200) {
+        const hand = table.hand!;
+        const actor = hand.actingIndex!;
+        const legal = getLegalActions(hand, actor);
+        const action =
+          actor === 1
+            ? legal.canRaise
+              ? { type: 'raise' as const, amount: legal.minRaiseTo }
+              : legal.canCall
+                ? { type: 'call' as const }
+                : { type: 'check' as const }
+            : legal.canCheck
+              ? { type: 'check' as const }
+              : { type: 'fold' as const };
+        table = act(table, actor, action);
+      }
+    }
+    const stats = table.players[1].statsRaw!;
+    expect(stats.hands).toBe(12);
+    // 他并非每手都轮到动作（座位 0 先弃牌时他直接收盲），所以 pfrRate 会低于 1
+    expect(stats.pfr).toBeLessThan(stats.hands);
+    // 但只要轮到他，他就加注 → 机会率必须是 100%
+    expect(stats.pfrOpps).toBe(stats.pfr);
+    const pub = toPublicStats(table.players[1].statsRaw)!;
+    expect(pub.pfrOpportunityRate).toBeCloseTo(1, 5);
+    expect(pub.pfrRate).toBeLessThan(1);
   });
 });

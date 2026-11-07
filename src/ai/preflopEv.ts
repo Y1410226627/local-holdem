@@ -54,6 +54,10 @@ export interface PreflopEvInput {
   opponentCount: number;
   /** 对手面对下注的平均弃牌率（null = 无样本）。 */
   foldToBet: number | null;
+  /** 对手统计的置信度 0..1（按样本手数）；决定「实测值」和「先验」的权重。 */
+  readConfidence?: number;
+  /** 对手「有加注机会时的加注率」0..1（无样本传 null），用于估被再加注的概率。 */
+  pfrOpportunity?: number | null;
   position: Position;
   /** 是否允许「跛入」。开池阶段（无人加注且无人跛入）应当只有加注或弃牌。 */
   allowLimp: boolean;
@@ -84,6 +88,8 @@ export interface PreflopEvResult {
   equity: number;
   /** 对「跟注范围」（比当前范围更紧）的权益。 */
   equityCalled: number;
+  /** 对「再加注范围」（最紧）的权益。 */
+  equityReraised: number;
   /** 权益实现率。 */
   realization: number;
   /** 估计的全下弃牌率（所有对手都弃）。 */
@@ -145,6 +151,7 @@ export function foldEquityFor(
   raiseCount: number,
   opponentCount: number,
   foldToBet: number | null,
+  confidence = 0.5,
 ): number {
   // 直接估「所有人都弃牌」的概率，而不是「单人弃牌率 ^ 人数」。
   // 后者会把 6 人桌开池算成 0.62^5 = 8.6%，严重低估加注的弃牌收益。
@@ -158,7 +165,11 @@ export function foldEquityFor(
         ? 0.45
         : 0.32;
   if (foldToBet === null) return prior;
-  return clamp(0.45 * prior + 0.55 * foldToBet, 0.1, 0.9);
+  // 收缩估计：样本越多越信实测值。
+  // 旧实现固定 45% 权重给先验，等于「永远不太相信数据」——一个从不弃牌的对手
+  // 也照样被估成 25% 弃牌率，加注的弃牌收益被凭空放大。
+  const w = clamp(0.15 + 0.75 * confidence, 0.15, 0.9);
+  return clamp((1 - w) * prior + w * foldToBet, 0.05, 0.9);
 }
 
 /**
@@ -166,11 +177,17 @@ export function foldEquityFor(
  *
  * 这一项之前漏了，导致模型认为「3-bet 任何两张都赚」——因为弃牌收益按整个底池算，
  * 而被跟注时的损失算得太轻。现实中 4-bet 会直接吃掉我们的全部投入。
+ *
+ * 有对手样本时按「有加注机会时的加注率」的平方估：平方是因为「他会加注」不等于
+ * 「他会再加注我的加注」，开池频率远高于 3-bet 频率；但极端值必须对——
+ * 一个每次轮到他加注就推的人，我们开池后他 100% 会推，这时再用 10% 的先验
+ * 就会让我们拿 3BB 去开池、被推了再弃，白送 3BB（实测 150 手白扔 42 个大盲）。
  */
-export function reraiseFor(raiseCount: number): number {
-  if (raiseCount <= 0) return 0.1;
-  if (raiseCount === 1) return 0.15;
-  return 0.05;
+export function reraiseFor(raiseCount: number, pfrOpportunity?: number | null): number {
+  const prior = raiseCount <= 0 ? 0.1 : raiseCount === 1 ? 0.15 : 0.05;
+  if (pfrOpportunity === null || pfrOpportunity === undefined) return prior;
+  const measured = clamp(pfrOpportunity, 0, 1) ** 2;
+  return clamp(Math.max(prior, measured), 0, 0.95);
 }
 
 export function evaluatePreflop(input: PreflopEvInput): PreflopEvResult {
@@ -197,8 +214,15 @@ export function evaluatePreflop(input: PreflopEvInput): PreflopEvResult {
   const samples = input.samples ?? 200;
   const riskPremium = input.riskPremium ?? 0.06;
   const realization = realizationFor(position, opponentCount, hero);
-  const foldEquity = foldEquityFor(raiseCount, opponentCount, foldToBet);
-  const reraiseChance = reraiseFor(raiseCount);
+  const rawFold = foldEquityFor(raiseCount, opponentCount, foldToBet, input.readConfidence ?? 0.5);
+  const rawReraise = reraiseFor(raiseCount, input.pfrOpportunity);
+  // 三种结局（全弃 / 跟注 / 再加注）的概率必须加起来 ≤ 1。
+  // 对手既不爱弃牌又爱再加注时（疯子），两项会同时很高，必须等比压缩，
+  // 否则 (1 − 弃牌率 − 再加注率) 变成负数，「被跟注」这个结局反而倒扣 EV。
+  const over = rawFold + rawReraise;
+  const scale = over > 0.95 ? 0.95 / over : 1;
+  const foldEquity = rawFold * scale;
+  const reraiseChance = rawReraise * scale;
 
   // 对「当前对手范围」的权益
   const equity = equityVsTopRange(hero, raiserRange, rng, samples);
@@ -206,6 +230,10 @@ export function evaluatePreflop(input: PreflopEvInput): PreflopEvResult {
   const callRange = Math.max(0.03, raiserRange * 0.55);
   const equityCalled =
     callRange >= raiserRange - 1e-6 ? equity : equityVsTopRange(hero, callRange, rng, samples);
+  // 再加注范围：比跟注范围更紧（他 3-bet 用的牌比跟注用的少）
+  const reraiseRange = Math.max(0.03, raiserRange * 0.45);
+  const equityReraised =
+    reraiseRange >= raiserRange - 1e-6 ? equity : equityVsTopRange(hero, reraiseRange, rng, samples);
 
   const options: PreflopEvOption[] = [];
 
@@ -219,7 +247,12 @@ export function evaluatePreflop(input: PreflopEvInput): PreflopEvResult {
 
   // 跟注（跛入）
   if (canCall && allowLimp) {
-    const ev = equity * (pot + callAmount) * realization - callAmount - riskPremium * callAmount;
+    // 跟注就把自己打光 → 之后没有翻后：不存在「被位置压制」「被迫弃掉权益」这些损失，
+    // 权益实现率必须正好是 1。旧实现一律按位置给 0.70~1.08，
+    // 等于把「跟全下」的价值系统性砍掉三成（Q9o 对随机牌 55.1%，按 0.70 折算只剩 38.6%）。
+    const callRealization = callAmount >= stack - 1e-6 ? 1 : realization;
+    const ev =
+      equity * (pot + callAmount) * callRealization - callAmount - riskPremium * callAmount;
     options.push({ kind: 'call', ev });
   }
 
@@ -229,12 +262,22 @@ export function evaluatePreflop(input: PreflopEvInput): PreflopEvResult {
     const invest = Math.max(1, target - committed);
     if (target > 0 && invest > 0) {
       const calledPot = pot + 2 * invest;
-      const evCalled = equityCalled * calledPot * realization - invest;
-      // 三种结局：所有人弃牌（赢底池）/ 有人跟注（打到摊牌）/ 被再加注（我们弃牌，损失投入）
+      // 全下加注被跟 → 同样没有翻后，实现率取 1
+      const raiseRealization = target >= maxRaiseTo - 1e-6 ? 1 : realization;
+      const evCalled = equityCalled * calledPot * raiseRealization - invest;
+      // 被再加注后我们还有一次决策：按对「再加注范围」的权益和全下赔率决定跟或弃。
+      // 旧实现直接记成「损失全部投入」，等于假设我们面对再加注 100% 弃牌——
+      // 碰到「每手都推」的对手时，这个假设会把开池算成大亏，机器人于是干脆不开池、
+      // 白送 0.5BB 盲注（实测从 +361 BB/100 掉到 −19.6）。
+      const evReraised = Math.max(
+        -invest,
+        equityReraised * calledPot * raiseRealization - invest,
+      );
+      // 三种结局：所有人弃牌（赢底池）/ 有人跟注（打到摊牌）/ 被再加注（再决策一次）
       const ev =
         foldEquity * pot +
         (1 - foldEquity - reraiseChance) * evCalled +
-        reraiseChance * -invest -
+        reraiseChance * evReraised -
         riskPremium * invest;
       options.push({ kind: 'raise', amount: target, ev });
     }
@@ -248,5 +291,5 @@ export function evaluatePreflop(input: PreflopEvInput): PreflopEvResult {
   // 筹码不足时不能「加注」，退化成全下——由调用方按 legal 处理
   void stack;
 
-  return { best, options, equity, equityCalled, realization, foldEquity };
+  return { best, options, equity, equityCalled, equityReraised, realization, foldEquity };
 }

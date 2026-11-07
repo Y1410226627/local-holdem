@@ -137,6 +137,14 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
     保证 `file://` 下零请求。**约束**：不要给它加任何需要网络请求的资源（字体、CDN、图片外链），
     否则双击打开就会挂。改动后必须跑 `scripts/smoke-single.cjs` 验证 `SINGLE_OK`。
 
+15. **强度回归必须用「会话台」（v0.23.0 起）**：`scripts/session.ts` 在同一张桌子上连打 N 手，
+    对手统计（`statsRaw`）会累积；每手把双方筹码重置到固定 50BB，保证每手是同一个随机变量。
+    **不要再用「每手新建桌子」的口径**（旧 `scripts/_cmp.ts` 已删除）：那样 `statsRaw` 永远是空的，
+    读人层被完全屏蔽，测出来的分只反映「单手能猜多准」，会把「会不会读人」这项能力整段抹掉
+    ——v0.22.0 曾因此误判「专家档对全下怪只有 +63.8」，换口径后其实是 +323.8。
+    对比老版本时，把同一份 `session.ts` 放进老版本源码目录，用**完全相同的参数**跑。
+    50BB 筹码下每手都是掷硬币式全下，400 手的 95% CI 约 ±250 BB/100，报数必须带 CI。
+
 14. **安卓 APK（每次版本更新必做）**：每个版本都要重新执行 `npm run apk` 并更新 `apk/` 目录（只保留当前版本文件），APK 的 versionName 由 `package.json` 自动生成；不要提交签名密钥（默认在 `C:\AndroidToolchain\keystore\`，已在 `android/.gitignore` 忽略）。
 
 ## 目录速览
@@ -146,7 +154,7 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 | `src/game/` | 纯函数规则引擎（牌堆、牌型、下注、边池、状态机、受限视图、日志） |
 | `src/ai/` | 四档难度、范围模型、蒙特卡洛胜率、大模型机器人、训练参数；`data/` 为训练产物 |
 | `src/ui/` | React 界面（教程、大厅、牌桌、设置栏、调试面板、历史回放）；`mobile.ts` 为手机布局判定与安卓壳检测 |
-| `src/tests/` | Vitest 测试（32 个文件 / 422 个用例） |
+| `src/tests/` | Vitest 测试（32 个文件 / 430 个用例） |
 | `src/ai/style.ts` | 体验随机：机器人风格原型 / 下注尺度偏好 / 本地台词 / 变化率 |
 | `src/ai/humanModel.ts` | 真人化：跨手统计 / 情绪 / 对手利用 / 真人式失误 / fold-equity EV |
 | `src/ai/challenge.ts` | 挑战宗师：宗师原型 / 读计时与下注细节 / 计时伪装 / range 极化 / EV 尺度 |

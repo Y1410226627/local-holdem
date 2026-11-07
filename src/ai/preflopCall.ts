@@ -129,10 +129,20 @@ function clamp01(value: number): number {
 }
 
 export interface RaiserRangeInput {
+  /** 加注额相对底池的倍数（用于识别「超池全下」这类异常尺度）。 */
+  raiseToPotRatio?: number;
   /** 我们要跟的筹码占「自己总筹码」的比例（0..1）。1 表示跟了就套牢/全下。 */
   commitFraction: number;
   /** 对手公开 PFR（0..1，无样本传 null）。 */
   avgPfr: number | null;
+  /**
+   * 「有加注机会时」的加注率（0..1）。优先于 avgPfr 使用。
+   *
+   * avgPfr 的分母包含他根本没轮到动作的手，所以一个「每轮到我加注我就加」的疯子
+   * 也只有 75%，会被估成「前 75% 范围」。实测 BB 面对他的 100BB 全下时，
+   * 估计权益比真实低 5 个百分点，150 手里有 28 次该跟没跟，白扔 2215 筹码（≈74 BB/100）。
+   */
+  pfrOpportunity?: number | null;
   /** 本街已经发生的加注次数（含这次）。 */
   raiseCount: number;
 }
@@ -147,11 +157,42 @@ export interface RaiserRangeInput {
  */
 export function estimateRaiserRange(input: RaiserRangeInput): number {
   const commit = clamp01(input.commitFraction);
-  // 小注（commit≈0）→ 约 0.55；全下（commit≈1）→ 约 0.10
-  const base = 0.10 + 0.45 * (1 - commit);
-  // PFR 30% 以上视为松，10% 以下视为紧
-  const tightness = input.avgPfr === null ? 0.5 : clamp01((0.3 - input.avgPfr) / 0.3);
-  const tighten = 1 - 0.5 * tightness;
-  const raiseTighten = 1 - Math.min(0.35, Math.max(0, input.raiseCount - 1) * 0.15);
-  return Math.max(0.04, Math.min(0.6, base * tighten * raiseTighten));
+  const ratio = input.raiseToPotRatio ?? 0;
+  // 优先用「有加注机会时的加注率」：它才是「他多常用加注这个动作」的无偏估计。
+  const measured =
+    input.pfrOpportunity !== null && input.pfrOpportunity !== undefined
+      ? clamp01(input.pfrOpportunity)
+      : input.avgPfr === null
+        ? null
+        : clamp01(input.avgPfr);
+
+  // 「他加注了」这个事实有两种解释，取决于他平时多爱加注：
+  //   ① 价值线：他用强牌要价值 → 范围由「押上多少筹码」决定（全下最窄）；
+  //   ② 疯子线：他本来就什么都加 → 范围就是他的 PFR。
+  // 旧实现只有 ①，于是把「每手都全下」的对手当成「前 7% 的强牌」，
+  // 实测 BB 面对 100BB 全下时给 Q9o 估 32.0% 权益（对随机牌真实 55.1%），
+  // 该跟的牌全弃了——这就是专家档对全下怪只有 +63.8 BB/100 而 v0.3.0 有 +313 的原因。
+  //
+  // 用 PFR 做「疯子线」的可信度：PFR 35% 以下完全按价值线，70% 以上完全按疯子线。
+  const maniacWeight = measured === null ? 0 : clamp01((measured - 0.35) / 0.35);
+  // 紧手（PFR < 30%）的加注更可信：他平时很少加，加了就是强牌。无样本时取中间值。
+  const tightness = measured === null ? 0.5 : clamp01((0.3 - measured) / 0.3);
+  const valueRange = (0.10 + 0.45 * (1 - commit)) * (1 - 0.5 * tightness);
+  const maniacRange = measured === null ? valueRange : Math.max(0.05, measured);
+  let range = valueRange * (1 - maniacWeight) + maniacRange * maniacWeight;
+
+  // 3-bet / 4-bet 是开池范围的子集，逐级收窄。
+  // 但这条只对「理性对手」成立：一个每次轮到他加注就加的人，3-bet 范围不会比开池窄，
+  // 所以按 maniacWeight 把收窄关掉（否则会把他的全下范围从 100% 压到 85%）。
+  const raiseTighten =
+    1 - Math.min(0.35, Math.max(0, input.raiseCount - 1) * 0.15) * (1 - maniacWeight);
+  range *= raiseTighten;
+
+  // 超池大注在没有 PFR 样本时仍按「可能是疯子」放宽。
+  // 有样本时这条已被 maniacWeight 覆盖，不再重复叠加（否则会对紧手也放宽）。
+  if (measured === null && ratio >= 6) {
+    range += Math.min(0.45, (ratio - 6) * 0.02);
+  }
+
+  return Math.max(0.04, Math.min(1, range));
 }

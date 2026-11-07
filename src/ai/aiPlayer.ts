@@ -25,7 +25,7 @@ import {
   getDifficultyProfile,
   type DifficultyProfile,
 } from './difficulty';
-import { exploitProfile, hasStrongExploitRead, type ExploitProfile } from './exploit';
+import { exploitProfile, hasStrongExploitRead, observedPassiveLine, type ExploitProfile } from './exploit';
 import { gtoBoundaryAdjust, gtoClosenessFor, gtoEvSizeChoice } from './gto';
 import { gtoPushFoldAdvice } from './gtoAdvice';
 import { depthLimitedSearch, estimateActionEv } from './search';
@@ -536,7 +536,13 @@ function decidePreflop(
     legal.callAmount / Math.max(1, view.self.stack + view.self.totalCommitted);
   // 无人加注时用「宽范围」占位（开池面对的是盲注的随机牌）
   const raiserRange = facingRaise
-    ? estimateRaiserRange({ commitFraction, avgPfr: ctx.opponents.avgPfr, raiseCount })
+    ? estimateRaiserRange({
+        commitFraction,
+        avgPfr: ctx.opponents.avgPfr,
+        pfrOpportunity: ctx.opponents.avgPfrOpportunity,
+        raiseCount,
+        raiseToPotRatio: view.currentBet / Math.max(1, view.pot - legal.callAmount),
+      })
     : 0.6;
   const raiseTo = facingRaise ? threeBetTarget(ctx, profile) : openRaiseTarget(ctx, profile);
   const opponentCount = Math.max(1, countOpponents(view));
@@ -557,11 +563,19 @@ function decidePreflop(
     raiseCount,
     opponentCount,
     foldToBet: ctx.opponents.avgFoldToBet,
+    readConfidence: ctx.opponents.confidence,
+    pfrOpportunity: ctx.opponents.avgPfrOpportunity,
     position,
     // 开池阶段（无人加注且前面没人跛入）不存在「跟注」这个选项：
     // 跛入在纯 EV 上看着便宜（3:1 赔率），但会招来加注、且翻后无位置，
     // 实测让引擎在 6 人桌 UTG 跛入 35%——现实中这是明显漏洞。
     allowLimp: facingRaise || countLimpers(view) >= 1 || (position === 'blinds' && opponentCount === 1),
+    // 挑战档的风险溢价更低：它的目标是「对可剥削对手榨取最大价值」，
+    // 而 6% 的安全边际会把大量本来 +EV 的边缘牌挡在门外
+    // （实测对跟注站入池率只有 44%，v0.3.0 是 51%，直接少赚）。
+    // 专家档也降到 3%：6% 在「面对 100BB 全下」时相当于 60 筹码的安全边际，
+    // 会把它推向过度弃牌（实测对全下怪 −25 BB/100，v0.3.0 是 +313）。
+    riskPremium: ctx.challenge ? 0.01 : 0.03,
     rng,
     samples: 200,
   });
@@ -888,6 +902,11 @@ function buildExploitProfile(
     baseBluffRate,
     baseCallMargin: profile.postflop.callMargin,
     strength: ctx.closeness,
+    passiveLine: observedPassiveLine({
+      opponentActions: view.actions
+        .filter((record) => record.actorId !== view.viewerId)
+        .map((record) => record.action.type),
+    }),
   });
 }
 
@@ -1764,7 +1783,15 @@ async function decideCore(
       // 强读时放弃均衡解：CFR 子博弈假设对手按均衡打，
       // 对一个「从不弃牌」的跟注站，均衡打法恰恰不是最优（实测转牌下注率只有 8%）。
       // 这时剥削收益远大于「不被利用」的价值。
-      const strongRead = ctx.exploitEnabled && hasStrongExploitRead(ctx.opponents);
+      // 强读：跨手统计（要几手才可信）**或**本手观察到的被动行为（当场可见）。
+      // 后者是对跟注站的关键——均衡求解器假设对手会弃牌，而他全跟。
+      const opponentActionsThisHand = view.actions
+        .filter((record) => record.actorId !== view.viewerId)
+        .map((record) => record.action.type);
+      const strongRead =
+        ctx.exploitEnabled &&
+        (hasStrongExploitRead(ctx.opponents) ||
+          observedPassiveLine({ opponentActions: opponentActionsThisHand }));
       // 单挑转牌：转+河联合 CFR+（精确，不依赖价值函数）。
       // 多人底池不套单挑解，继续走挑战启发式 + 多人谨慎。
       if (

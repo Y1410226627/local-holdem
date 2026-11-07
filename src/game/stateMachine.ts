@@ -33,6 +33,7 @@ export function createEmptyStatsRaw(): PlayerStatsRaw {
     hands: 0,
     vpip: 0,
     pfr: 0,
+    pfrOpps: 0,
     bets: 0,
     raises: 0,
     calls: 0,
@@ -69,6 +70,10 @@ export function toPublicStats(raw: PlayerStatsRaw | undefined): PublicPlayerStat
     hands: raw.hands,
     vpipRate: raw.vpip / raw.hands,
     pfrRate: raw.pfr / raw.hands,
+    // 分母只算「他真正行动过」的手：这才是「轮到我加注时我多常加注」。
+    // 用 raw.hands 当分母会把「没轮到动作」也算进机会里，系统性低估加注频率。
+    pfrOpportunityRate:
+      (raw.pfrOpps ?? 0) > 0 ? Math.min(1, raw.pfr / (raw.pfrOpps ?? 1)) : raw.pfr / raw.hands,
     aggression: Math.min(5, (raw.bets + raw.raises) / Math.max(1, raw.calls)),
     foldToBetRate: raw.facedBet > 0 ? raw.foldedToBet / raw.facedBet : null,
     netChips: raw.netChips,
@@ -90,6 +95,8 @@ function updateSessionStats(table: TableState): void {
   // VPIP / PFR 按「手」计一次：同一手翻牌前的多次跟注 / 加注不重复累计。
   const vpipMark = new Set<number>();
   const pfrMark = new Set<number>();
+  // 「有机会加注」= 本手翻牌前真正行动过（能加注却没轮到的人不算机会）
+  const actedPreflop = new Set<number>();
   for (const record of hand.actions) {
     if (record.street !== street) {
       street = record.street;
@@ -99,6 +106,7 @@ function updateSessionStats(table: TableState): void {
     if (!raw) continue;
     const action = record.action;
     if (street === 'preflop') {
+      actedPreflop.add(record.actorId);
       const vpipAction =
         action.type === 'call' || action.type === 'bet' || action.type === 'raise' || action.type === 'allin';
       const raiseAction = action.type === 'bet' || action.type === 'raise' || action.type === 'allin';
@@ -144,6 +152,11 @@ function updateSessionStats(table: TableState): void {
     if (action.type === 'bet' || action.type === 'raise' || action.type === 'allin') {
       streetBet = Math.max(streetBet, record.toAmount);
     }
+  }
+
+  for (const id of actedPreflop) {
+    const raw = raws.get(id);
+    if (raw) raw.pfrOpps = (raw.pfrOpps ?? 0) + 1;
   }
 
   for (const player of table.players) {

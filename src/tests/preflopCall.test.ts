@@ -16,6 +16,7 @@ import { equityVsTopRange, estimateRaiserRange, topRangeKeys } from '../ai/prefl
 import { buildPlayerView } from '../game/playerView';
 import { decide } from '../ai/aiPlayer';
 import { derivedRng } from '../game/cards';
+import type { Card } from '../game/types';
 import { CC, makeHand, playSequence } from './helpers';
 
 describe('起手牌强度：必须尊重「压制」关系', () => {
@@ -147,5 +148,78 @@ describe('决策：面对全下必须弃掉 J9o、跟注 AA', () => {
     // 具体动作不锁死——J9o 在这里权益 38.8%、底池赔率 38.9%，本来就是边缘牌。
     expect(decision.debug.reasoning).toContain('EV：');
     expect(decision.debug.reasoning).toContain('弃牌率');
+  });
+});
+
+describe('对手范围模型：加注频率决定「大注是不是强牌」', () => {
+  const range = (opts: {
+    pfr?: number | null;
+    pfrOpportunity?: number | null;
+    commit: number;
+    ratio?: number;
+    raiseCount?: number;
+  }) =>
+    estimateRaiserRange({
+      commitFraction: opts.commit,
+      avgPfr: opts.pfr ?? null,
+      pfrOpportunity: opts.pfrOpportunity ?? null,
+      raiseCount: opts.raiseCount ?? 1,
+      raiseToPotRatio: opts.ratio ?? 20,
+    });
+
+  it('每手都全下的人（加注机会率 100%）：范围估成接近 100%，而不是「前 10%」', () => {
+    // 旧实现只看「押了多少筹码」，100BB 全下 → 前 10%，
+    // 于是 BB 拿 Q9o（对随机牌真实 55.1%）只估到 32%，该跟的牌全弃了。
+    expect(range({ pfrOpportunity: 1, commit: 0.98 })).toBeGreaterThan(0.95);
+  });
+
+  it('从不加注的人突然全下：范围极窄', () => {
+    expect(range({ pfrOpportunity: 0, commit: 0.98 })).toBeLessThan(0.1);
+  });
+
+  it('单调：加注频率越高，范围越宽', () => {
+    const values = [0, 0.2, 0.4, 0.6, 0.8, 1].map((p) =>
+      range({ pfrOpportunity: p, commit: 0.98 }),
+    );
+    for (let i = 1; i < values.length; i++) {
+      expect(values[i]).toBeGreaterThanOrEqual(values[i - 1] - 1e-9);
+    }
+  });
+
+  it('3-bet / 4-bet 会收窄理性对手的范围，但不会收窄疯子的', () => {
+    const normal = range({ pfrOpportunity: 0.25, commit: 0.4, raiseCount: 3 });
+    const normalOpen = range({ pfrOpportunity: 0.25, commit: 0.4, raiseCount: 1 });
+    expect(normal).toBeLessThan(normalOpen);
+    const maniac = range({ pfrOpportunity: 1, commit: 0.98, raiseCount: 3 });
+    expect(maniac).toBeGreaterThan(0.95);
+  });
+
+  it('无样本时退回「押了多少」的先验：押得越多，范围越窄', () => {
+    const small = range({ commit: 0.05, ratio: 3 });
+    const allin = range({ commit: 0.98, ratio: 3 });
+    expect(allin).toBeLessThan(small);
+  });
+
+  it('无样本时，超池全下（3BB 底池推 100BB）按「可能是疯子」放宽', () => {
+    const normal = range({ commit: 0.98, ratio: 3 });
+    const overbet = range({ commit: 0.98, ratio: 20 });
+    expect(overbet).toBeGreaterThan(normal);
+  });
+});
+
+describe('全下之后没有翻后：权益实现率必须是 1', () => {
+  it('跟注全下时 EV 用实现率 1（旧实现按 OOP 打折 0.7，白扔三成价值）', () => {
+    // 用同一手牌分别算「跟注全下」与「用 realizationFor 打折」的结果，前者必须更高
+    const hero = CC('Qh 9s') as [Card, Card];
+    const rng = derivedRng('realization-test');
+    const pot = 1030;
+    const callAmount = 980;
+    const equity = equityVsTopRange(hero, 1.0, rng, 2000);
+    const withRealization = equity * (pot + callAmount) * 0.7 - callAmount;
+    const withoutRealization = equity * (pot + callAmount) - callAmount;
+    expect(withoutRealization).toBeGreaterThan(withRealization);
+    // Q9o 对随机牌约 55%，全下赔率 48.8%，所以不打折时是 +EV
+    expect(equity).toBeGreaterThan(0.5);
+    expect(withoutRealization).toBeGreaterThan(0);
   });
 });
