@@ -211,9 +211,19 @@ export function buildRangeForPlayer(
 
 const rangeCache = new Map<string, Map<number, Range>>();
 
-/** 构造当前视图下所有活跃对手的按街范围（按 seed + 动作数 + 街 + 牌面缓存）。 */
+/**
+ * 构造当前视图下所有活跃对手的按街范围（带缓存）。
+ *
+ * 缓存键必须包含**动作内容**，不能只用动作数量：
+ * 两条不同的行动线可以有相同的长度（例如「加注-跟注」与「加注-弃牌」），
+ * 用数量做键会让后一条线命中前一条线的范围——这是真 bug，
+ * 在「同 seed 两条臂并行」的审计里会互相污染。
+ */
 export function buildStreetRanges(view: PlayerView): Map<number, Range> {
-  const cacheKey = `${view.seed}|${view.actions.length}|${view.street}|${view.board.map(cardKey).join(',')}`;
+  const actionDigest = view.actions
+    .map((record) => `${record.street[0]}${record.action.type[0]}${record.toAmount ?? 0}`)
+    .join(',');
+  const cacheKey = `${view.seed}|${view.street}|${view.board.map(cardKey).join(',')}|${actionDigest}`;
   const cached = rangeCache.get(cacheKey);
   if (cached) return cached;
   const out = new Map<number, Range>();

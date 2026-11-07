@@ -22,6 +22,7 @@ import {
   getDifficultyProfile,
   type DifficultyProfile,
 } from './difficulty';
+import { exploitProfile, hasStrongExploitRead, type ExploitProfile } from './exploit';
 import { gtoBoundaryAdjust, gtoClosenessFor, gtoEvSizeChoice } from './gto';
 import { gtoPushFoldAdvice } from './gtoAdvice';
 import { depthLimitedSearch, estimateActionEv } from './search';
@@ -140,6 +141,10 @@ export interface AIDecisionOptions {
   blueprintSb?: boolean;
   /** 翻后是否用蓝图推出的范围（基准消融用；默认 true）。 */
   blueprintRanges?: boolean;
+  /** 翻前是否按对手弃牌率做剥削（基准消融用；默认 true）。 */
+  preflopExploit?: boolean;
+  /** 是否启用剥削层（基准消融用；默认 true）。关闭后完全回到旧常量阈值。 */
+  exploit?: boolean;
   /** 单挑 SB 是否放宽开池（基准消融用；默认 true）。 */
   sbWide?: boolean;
   /** 单挑 SB 翻前参数覆盖（基准消融用；默认 HU_SB_PREFLOP）。 */
@@ -170,7 +175,13 @@ export interface AIDebugInfo {
   /** 决策来源：本地算法 / 本地大模型。 */
   source?: 'local' | 'llm';
   /** 本地算法的具体引擎：CFR 子博弈 / 翻前蓝图 / 多人挑战 / 启发式。 */
-  engine?: 'cfr-subgame' | 'cfr-turn-river' | 'preflop-blueprint' | 'challenge-multiway' | 'heuristic';
+  engine?:
+    | 'cfr-subgame'
+    | 'cfr-turn-river'
+    | 'preflop-blueprint'
+    | 'preflop-exploit'
+    | 'challenge-multiway'
+    | 'heuristic';
   /** 大模型名称（source === 'llm' 时）。 */
   model?: string;
   /** 大模型调用耗时（毫秒）。 */
@@ -207,6 +218,8 @@ interface DecisionContext {
   challenge: boolean;
   /** GTO / 均衡接近度 0..1（难度越高越接近均衡策略）。 */
   closeness: number;
+  /** 是否启用剥削层（消融对照用）。 */
+  exploitEnabled: boolean;
   /** 挑战模式的宗师原型 id。 */
   archetypeId?: number;
   /** 当前手读到的对手思考时间（挑战模式）。 */
@@ -769,14 +782,73 @@ function decideHardPostflop(
   return { action, reasoning };
 }
 
-function pickExpertBetFraction(ctx: DecisionContext, equity: number): number {
+function pickExpertBetFraction(
+  ctx: DecisionContext,
+  equity: number,
+  sizeBias: 'larger' | 'smaller' | 'neutral' = 'neutral',
+): number {
   const { view, rng } = ctx;
   const sizes = DIFFICULTY_PROFILES.expert.postflop.betSizes;
+  // 剥削性尺度：对手必跟就做大底池；对手对任何尺度都弃就用小的（同样的弃牌率，风险更小）。
+  if (sizeBias === 'larger') return sizes[sizes.length - 1];
+  if (sizeBias === 'smaller') return sizes[0];
   if (view.street === 'river' && equity >= 0.7 && rng() < 0.3) {
     return sizes[sizes.length - 1];
   }
   const limit = view.street === 'river' ? sizes.length : Math.max(1, sizes.length - 1);
   return pickBetFraction(ctx, equity, sizes.slice(0, limit));
+}
+
+/**
+ * 计算当前局面的剥削调整。
+ *
+ * `bet` 用「中性尺度下的计划下注额」估算，因为均衡诈唬比例 α = bet/(pot+2bet) 依赖尺度。
+ * 尺度偏好（sizeBias）要等 exploit 算完才知道，所以这里用中性尺度做一次近似——
+ * α 对尺度的敏感度是线性的，一次近似足够（半池与满池的 α 只差 25%）。
+ */
+function buildExploitProfile(
+  ctx: DecisionContext,
+  equity: number,
+  baseValueThreshold: number,
+  baseBluffRate: number,
+  enabled = true,
+): ExploitProfile {
+  const { view, legal, profile } = ctx;
+  if (!enabled) {
+    // 消融对照臂：完全回到旧行为（常量阈值、无尺度缩放、无价值频率提升）。
+    return {
+      archetype: 'unknown',
+      confidence: 0,
+      weight: 0,
+      foldSignal: 0,
+      aggressionSignal: 0,
+      valueThreshold: baseValueThreshold,
+      bluffRate: baseBluffRate,
+      callThreshold: ctx.potOdds + profile.postflop.callMargin,
+      sizeBias: 'neutral',
+      valueBetChance: 0.7,
+      mdf: 0,
+      alpha: 0,
+      note: '剥削层已关闭（对照臂）',
+    };
+  }
+  const neutralTarget = targetFromFraction(
+    view,
+    legal,
+    pickExpertBetFraction(ctx, equity, 'neutral'),
+  );
+  return exploitProfile({
+    summary: ctx.opponents,
+    pot: view.pot,
+    bet: Math.max(1, neutralTarget - legal.currentBet),
+    potOdds: ctx.potOdds,
+    closeness: ctx.closeness,
+    opponentCount: countOpponents(view),
+    baseValueThreshold,
+    baseBluffRate,
+    baseCallMargin: profile.postflop.callMargin,
+    strength: ctx.closeness,
+  });
 }
 
 function multiStreetPlan(
@@ -807,7 +879,17 @@ function decideExpertPostflop(
   reads: readonly OpponentRead[],
 ): PostflopResult {
   const { view, legal, profile, rng } = ctx;
-  const required = ctx.potOdds + profile.postflop.callMargin;
+  // 三个阈值全部经过剥削层：价值线 / 诈唬率 / 跟注线。
+  // 旧实现是「profile 常量 + 固定 callMargin」，对跟注站和弃牌站用同一套数字，
+  // 是最容易被人类针对的地方。
+  const exploit = buildExploitProfile(
+    ctx,
+    equity,
+    profile.postflop.valueThreshold,
+    profile.postflop.bluffRate,
+    ctx.exploitEnabled,
+  );
+  const required = exploit.callThreshold;
   const spr = view.self.stack / Math.max(1, view.pot);
   const inPosition = positionOf(view) === 'late';
   const opponentCount = countOpponents(view);
@@ -822,7 +904,7 @@ function decideExpertPostflop(
   let note: string;
 
   if (legal.canCheck) {
-    const size = pickExpertBetFraction(ctx, equity);
+    const size = pickExpertBetFraction(ctx, equity, exploit.sizeBias);
     const bet = buildAggressive(legal, targetFromFraction(view, legal, size));
     if (equity >= 0.78) {
       if (spr <= 2.5 && legal.canAllIn && legal.maxRaiseTo > legal.currentBet) {
@@ -835,16 +917,16 @@ function decideExpertPostflop(
         action = { type: 'check' };
         note = '无法下注，过牌';
       }
-    } else if (equity >= profile.postflop.valueThreshold && bet && rng() < 0.7) {
+    } else if (equity >= exploit.valueThreshold && bet && rng() < exploit.valueBetChance) {
       action = bet;
-      note = '胜率超过价值线，混合尺度下注';
+      note = `胜率超过价值线 ${(exploit.valueThreshold * 100).toFixed(0)}%，混合尺度下注`;
     } else if (semi && bet) {
       action = bet;
       note = '听牌半诈唬，兼顾弃牌率';
     } else if (
       bet &&
       rng() <
-        profile.postflop.bluffRate * (inPosition ? 1.2 : 0.7)
+        exploit.bluffRate * (inPosition ? 1.2 : 0.7)
     ) {
       action = bet;
       note = inPosition ? '晚位极化诈唬' : '按平衡频率诈唬';
@@ -855,7 +937,7 @@ function decideExpertPostflop(
   } else {
     const raise = buildAggressive(
       legal,
-      targetFromFraction(view, legal, pickExpertBetFraction(ctx, equity)),
+      targetFromFraction(view, legal, pickExpertBetFraction(ctx, equity, exploit.sizeBias)),
     );
     if (
       (equity >= 0.82 || (spr <= 2 && equity >= 0.6)) &&
@@ -886,7 +968,7 @@ function decideExpertPostflop(
     `专家风格：${analysis.categoryName}，范围收窄后蒙特卡洛 ${iterations} 次胜率 ` +
     `${(equity * 100).toFixed(1)}%，底池赔率 ${(ctx.potOdds * 100).toFixed(1)}%，` +
     `SPR ${spr.toFixed(2)}；对手 ${opponentCount} 人（加注 ${totalRaises} 次 / 跟注 ${totalCalls} 次）；` +
-    `${note}；${plan}。`;
+    `${note}；${plan}；剥削：${exploit.note}。`;
   return { action, reasoning };
 }
 
@@ -929,7 +1011,19 @@ function decideChallengePostflop(
   const aggressorTiming = lastAggressive
     ? ctx.timingTells.find((tell) => tell.playerId === lastAggressive.actorId)
     : undefined;
-  let required = ctx.potOdds + post.callMargin;
+  // 剥削层：价值线 / 诈唬率 / 跟注线全部按对手公开统计调整。
+  // 旧实现只有一条「vpip>0.55 就把价值线降 0.04」，对跟注站几乎等于没调整。
+  const exploit = buildExploitProfile(
+    ctx,
+    equity,
+    post.valueThreshold,
+    post.bluffRate,
+    ctx.exploitEnabled,
+  );
+
+  let required = exploit.callThreshold;
+  // 计时读人：长考后下注 → 两极，多抓诈；秒打 → 偏价值，收紧跟注。
+  // 这部分是**本手**的信息，与跨手统计独立，所以在剥削层之后叠加。
   if (aggressorTiming && aggressorTiming.confidence >= 0.4) {
     if (aggressorTiming.tell === 'slow' && aggressorTiming.context === 'aggressive') {
       required -= 0.03 * aggressorTiming.confidence;
@@ -937,13 +1031,9 @@ function decideChallengePostflop(
       required += 0.025 * aggressorTiming.confidence;
     }
   }
-  required = Math.max(0.05, Math.min(0.9, required));
+  required = Math.max(0.02, Math.min(0.95, required));
 
-  // 对手越爱跟注 → 价值线越薄；越紧 → 越标准。
-  const valueThreshold = Math.max(
-    0.5,
-    Math.min(0.92, post.valueThreshold + (opponents.avgVpip !== null && opponents.avgVpip > 0.55 ? -0.04 : 0)),
-  );
+  const valueThreshold = Math.max(0.45, Math.min(0.92, exploit.valueThreshold));
   const foldEquity = challengeFoldEquity(opponents, opponentCount, 0.75, aggressorTiming?.tell);
   const semi =
     analysis.draw.hasDraw &&
@@ -951,7 +1041,7 @@ function decideChallengePostflop(
     rng() < post.semiBluffRate * (0.85 + archetype.aggression * 0.2);
   const bluffChance = Math.min(
     0.6,
-    post.bluffRate *
+    exploit.bluffRate *
       archetype.aggression *
       (weakSignals.weak ? 1.5 : 1) *
       (foldEquity >= 0.5 ? 1.2 : 0.85),
@@ -995,10 +1085,17 @@ function decideChallengePostflop(
       closeness: ctx.closeness,
       rng,
     });
-    if (rng() < ctx.closeness) {
-      return { fraction: gto.fraction, ev: base.ev, note: gto.note || base.note };
+    const result =
+      rng() < ctx.closeness
+        ? { fraction: gto.fraction, ev: base.ev, note: gto.note || base.note }
+        : base;
+    // 剥削性尺度：对手必跟就做大底池，对手对任何尺度都弃就用小的。
+    if (exploit.sizeBias !== 'neutral') {
+      const pick =
+        exploit.sizeBias === 'larger' ? Math.max(...scaledFractions) : Math.min(...scaledFractions);
+      return { ...result, fraction: pick };
     }
-    return base;
+    return result;
   };
 
   let action: PlayerAction;
@@ -1012,7 +1109,7 @@ function decideChallengePostflop(
     if (trapSlowplay) {
       action = { type: 'check' };
       note = '陷阱：强牌慢玩，诱导下一条街';
-    } else if (valueBet && (strong ? rng() < 0.82 : false)) {
+    } else if (valueBet && (strong ? rng() < Math.min(1, exploit.valueBetChance + 0.12) : false)) {
       if (monster && spr <= 2.2 && legal.canAllIn) {
         action = { type: 'allin' };
         note = '低 SPR + 极高胜率：直接全下施压';
@@ -1124,7 +1221,7 @@ function decideChallengePostflop(
   const reasoning =
     `挑战（${archetype.label}）：${analysis.categoryName}，范围建模 + 读人后 MC ${iterations} 次胜率 ` +
     `${(equity * 100).toFixed(1)}%，必要胜率 ${(required * 100).toFixed(1)}%，SPR ${spr.toFixed(2)}；` +
-    `读计时：${timingText}；读尺度：${bettingText}；${note}。`;
+    `读计时：${timingText}；读尺度：${bettingText}；剥削：${exploit.note}；${note}。`;
   return { action, reasoning };
 }
 
@@ -1403,6 +1500,7 @@ async function decideCore(
     opponents,
     challenge,
     closeness,
+    exploitEnabled: options.exploit !== false,
     archetypeId,
     timingTells,
     bettingTells,
@@ -1417,7 +1515,13 @@ async function decideCore(
   let variationReference: number | undefined;
   let analysisHasDraw = false;
   let solvedByCfr = false;
-  let decisionSource: 'cfr-subgame' | 'cfr-turn-river' | 'preflop-blueprint' | 'challenge-multiway' | 'heuristic' = 'heuristic';
+  let decisionSource:
+    | 'cfr-subgame'
+    | 'cfr-turn-river'
+    | 'preflop-blueprint'
+    | 'preflop-exploit'
+    | 'challenge-multiway'
+    | 'heuristic' = 'heuristic';
 
   const isPreflop = view.street === 'preflop' || view.board.length < 3;
   if (isPreflop) {
@@ -1481,6 +1585,64 @@ async function decideCore(
         }
       }
     }
+
+    // 翻前剥削：单挑按钮面对「见加注就弃」的对手，弃掉任何两张牌都是直接放弃 1.5BB 死钱。
+    // 蓝图的 SB 弃牌率（约 8%）假设对手会正常防守；对一个弃牌率 70%+ 的对手，这个假设不成立。
+    // 反向同样重要：对手从不弃牌时，用垃圾牌加注只会放大亏损，所以给弱牌加注设下限。
+    const preflopFoldToBet = ctx.opponents.avgFoldToBet;
+    if (
+      isHeadsUpSb &&
+      legal.aggressiveType &&
+      view.currentBet <= view.bigBlind &&
+      options.preflopExploit !== false &&
+      options.exploit !== false &&
+      preflopFoldToBet !== null
+    ) {
+      const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
+      // 弃牌率 55% 起算，85% 时达到满强度；再乘样本置信度与难度允许的剥削强度。
+      const exploitStrength = clamp01(
+        ((preflopFoldToBet - 0.55) / 0.3) * ctx.opponents.confidence * ctx.closeness,
+      );
+      if (exploitStrength > 0.25 && rng() < exploitStrength) {
+        const raiseTo = Math.max(
+          legal.minRaiseTo,
+          Math.min(
+            legal.maxRaiseTo,
+            Math.round(view.bigBlind * Math.max(2, profile.preflop.openRaiseBB)),
+          ),
+        );
+        action = { type: legal.aggressiveType, amount: raiseTo };
+        decisionSource = 'preflop-exploit';
+        reasoning =
+          `挑战（翻前剥削）：对手面对下注弃牌 ${(preflopFoldToBet * 100).toFixed(0)}%` +
+          `（置信度 ${(ctx.opponents.confidence * 100).toFixed(0)}%），任意两张开池加注到 ${raiseTo}。`;
+      } else if (
+        ctx.opponents.confidence > 0.4 &&
+        ctx.closeness > 0.5 &&
+        (action.type === 'raise' || action.type === 'allin')
+      ) {
+        // 两种「加注没有弃牌收益」的情形，但代价不同：
+        //
+        // ① 对手爱再加注（攻击性 ≥2.5，例如每手全下）：我们加注后会被再加注，
+        //    用一手「不会跟再加注」的牌加注意味着亏 3.2BB 而不是 1BB。
+        //    所以门槛要高得多——只有确实会跟再加注的强牌才值得加注。
+        // ② 对手只是爱跟不爱弃（跟注站）：加注不会被反打，弱牌加注只是放大波动，
+        //    门槛较低即可。
+        const aggression = ctx.opponents.avgAggression ?? 0;
+        const willReraise = aggression >= 2.5;
+        const limpThreshold = willReraise ? 0.65 : 0.35;
+        const noFoldEquity = willReraise || preflopFoldToBet < 0.2;
+        if (noFoldEquity && strength < limpThreshold) {
+          action = legal.canCall ? { type: 'call' } : { type: 'fold' };
+          decisionSource = 'preflop-exploit';
+          reasoning =
+            `挑战（翻前剥削）：对手${willReraise ? '爱再加注' : '几乎不弃牌'}` +
+            `（弃牌 ${(preflopFoldToBet * 100).toFixed(0)}%，攻击性 ${aggression.toFixed(1)}），` +
+            `起手牌强度 ${(strength * 100).toFixed(0)}% 不足以承受再加注，改跛入。` +
+            reasoning;
+        }
+      }
+    }
   } else {
     const analysis = analyzePostflop(view.self.holeCards, view.board);
     handCategory = analysis.categoryName;
@@ -1510,12 +1672,17 @@ async function decideCore(
     let result: PostflopResult | null = null;
     if (challenge) {
       const rounds = resolveIterations(profile, options);
+      // 强读时放弃均衡解：CFR 子博弈假设对手按均衡打，
+      // 对一个「从不弃牌」的跟注站，均衡打法恰恰不是最优（实测转牌下注率只有 8%）。
+      // 这时剥削收益远大于「不被利用」的价值。
+      const strongRead = ctx.exploitEnabled && hasStrongExploitRead(ctx.opponents);
       // 单挑转牌：转+河联合 CFR+（精确，不依赖价值函数）。
       // 多人底池不套单挑解，继续走挑战启发式 + 多人谨慎。
       if (
         ENABLE_TURN_RIVER_SOLVER &&
         activeOpponents === 1 &&
         view.street === 'turn' &&
+        !strongRead &&
         options.turnRiver?.enabled !== false
       ) {
         const solved = solveTurnRiver(view, {
@@ -1543,6 +1710,7 @@ async function decideCore(
         activeOpponents === 1 &&
         view.street === 'river' &&
         legal.callAmount > 0 &&
+        !strongRead &&
         options.solver?.enabled !== false
       ) {
         const solved = solveStreetSubgame(view, {

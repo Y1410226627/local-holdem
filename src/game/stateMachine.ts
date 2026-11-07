@@ -113,7 +113,13 @@ function updateSessionStats(table: TableState): void {
     }
     if (action.type === 'bet') raw.bets += 1;
     else if (action.type === 'raise') raw.raises += 1;
-    else if (action.type === 'call') raw.calls += 1;
+    else if (action.type === 'allin') {
+      // 全下要么是加注、要么是跟注，取决于它是否抬高了当前下注额。
+      // 旧实现完全不计入，导致「每手全下」的对手 aggression 恒为 0——
+      // 被当成最被动的人，针对它的剥削逻辑因此全部失效。
+      if (record.toAmount > streetBet) raw.raises += 1;
+      else raw.calls += 1;
+    } else if (action.type === 'call') raw.calls += 1;
     else if (action.type === 'fold') raw.folds += 1;
 
     // 思考时间统计：挑战模式用于读「快 / 慢」计时漏洞。
