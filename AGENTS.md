@@ -168,6 +168,8 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
       面对纯被动线路时 `strongRead` 会直接跳过求解器，差值恒为 0。
     - **新旧对打**（`head2head.ts` + `git worktree`）：唯一能回答「整体是否变强」的口径。
       2000 手（4000 局）CI 约 ±60。固定对手已接近天花板，整体强度只能这样测。
+      用法：`git worktree add ../holdem-old <旧 commit>`，把 `scripts/session.ts` 复制过去，
+      然后 `HANDS=1200 npx tsx scripts/head2head.ts`；跑完 `git worktree remove --force ../holdem-old`。
 
 14. **安卓 APK（每次版本更新必做）**：每个版本都要重新执行 `npm run apk` 并更新 `apk/` 目录（只保留当前版本文件），APK 的 versionName 由 `package.json` 自动生成；不要提交签名密钥（默认在 `C:\AndroidToolchain\keystore\`，已在 `android/.gitignore` 忽略）。
 
