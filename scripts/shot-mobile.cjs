@@ -107,6 +107,39 @@ app.whenReady().then(async () => {
     })`);
     log.push('afterClick=' + JSON.stringify(after));
 
+    // 2.4) 手机上设置是抽屉，开局后可能仍展开，先收起，否则挡住牌桌
+    const collapsed = await win.webContents.executeJavaScript(`(() => {
+      const btn = [...document.querySelectorAll('button')].find((b) => b.textContent.includes('收起'));
+      if (!btn) return 'no-drawer';
+      btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+      return 'collapsed';
+    })()`);
+    log.push(`drawer=${collapsed}`);
+    await new Promise((r) => setTimeout(r, 600));
+
+    // 2.5) 可选：自动点「过牌 / 跟注」推进到翻牌，便于检查公共牌排版
+    const STEPS = Number(process.env.STEPS || 0);
+    for (let step = 0; step < STEPS; step++) {
+      const clicked = await win.webContents.executeJavaScript(`(() => {
+        const want = ['过牌', '跟注'];
+        const btn = [...document.querySelectorAll('button')].find(
+          (b) => !b.disabled && want.some((w) => b.textContent.includes(w)),
+        );
+        if (!btn) return null;
+        btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+        return btn.textContent.trim();
+      })()`);
+      if (!clicked) break;
+      await new Promise((r) => setTimeout(r, 1400));
+    }
+    log.push('buttons=' + JSON.stringify(await win.webContents.executeJavaScript(
+      `[...document.querySelectorAll('button')].filter(b=>!b.disabled).map(b=>b.textContent.trim()).slice(0,12)`,
+    )));
+    const boardCount = await win.webContents.executeJavaScript(
+      `document.querySelectorAll('.board .card:not(.card--empty)').length`,
+    );
+    log.push(`boardCards=${boardCount}`);
+
     // 3) 探一下当前局面
     const probe = await win.webContents.executeJavaScript(`(() => {
       const stage = document.querySelector('.table-stage');

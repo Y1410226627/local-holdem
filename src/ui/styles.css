@@ -875,20 +875,25 @@ select.field__control option {
 }
 
 .card--lg {
-  width: clamp(38px, 4.4vw, 54px);
+  /* 所有尺寸共用 --card-w，字号按它按比例算，改宽度不会再把字裁掉 */
+  --card-w: clamp(38px, 4.4vw, 54px);
+  width: var(--card-w);
   aspect-ratio: 5 / 7;
-  padding: 5px;
+  padding: 4px;
 }
 
 .card--md {
-  width: 44px;
+  --card-w: 44px;
+  width: var(--card-w);
   height: 62px;
   padding: 4px;
 }
 
 .card--sm {
-  width: 32px;
-  height: 45px;
+  --card-w: 32px;
+  width: var(--card-w);
+  /* 高度跟着宽度走（5:7），只改 --card-w 时比例不会失衡 */
+  height: calc(var(--card-w) * 1.406);
   padding: 3px;
   border-radius: 5px;
 }
@@ -920,30 +925,20 @@ select.field__control option {
 
 .card__rank {
   font-family: var(--font-num);
-  font-size: 13px;
+  /* 按牌宽取比例：任何尺寸下「字 + 花色」都塞得进角标，不会溢出被裁 */
+  font-size: calc(var(--card-w, 40px) * 0.34);
   line-height: 1;
 }
 
 .card__suit {
-  font-size: 10px;
+  font-size: calc(var(--card-w, 40px) * 0.24);
   line-height: 1;
   margin-top: 1px;
 }
 
-.card--lg .card__rank {
-  font-size: 16px;
-}
-
-.card--lg .card__suit {
-  font-size: 12px;
-}
-
-.card--sm .card__rank {
-  font-size: 11px;
-}
-
-.card--sm .card__suit {
-  font-size: 8px;
+.card--sm .card__pip,
+.card--sm .card__corner--bottom {
+  display: none;
 }
 
 .card__pip {
@@ -956,15 +951,30 @@ select.field__control option {
   pointer-events: none;
 }
 
-.card--lg .card__pip {
+.card--lg .card--sm .card__pip,
+.card--sm .card__corner--bottom {
+  display: none;
+}
+
+.card__pip {
   font-size: 29px;
 }
 
-.card--md .card__pip {
+.card--md .card--sm .card__pip,
+.card--sm .card__corner--bottom {
+  display: none;
+}
+
+.card__pip {
   font-size: 23px;
 }
 
-.card--sm .card__pip {
+.card--sm .card--sm .card__pip,
+.card--sm .card__corner--bottom {
+  display: none;
+}
+
+.card__pip {
   display: none;
 }
 
@@ -4778,18 +4788,16 @@ button,
     display: none;
   }
 
-  /* 3) 公共牌缩小，给左右座位留出明确间隙 */
+  /* 3) 公共牌缩小，给左右座位留出明确间隙。
+        只改 --card-w，字号按比例自动跟随（写死字号会把字裁掉）。 */
   .board .card--lg {
-    width: clamp(30px, 7.4vw, 40px);
-    padding: 4px;
+    --card-w: clamp(32px, 7.6vw, 42px);
+    padding: 3px;
   }
 
-  .board .card--lg .card__rank {
-    font-size: 14px;
-  }
-
-  .board .card--lg .card__suit {
-    font-size: 10px;
+  /* 窄牌上「角标 + 中央大花色」塞不下，中央花色会压住字母 → 只保留角标 */
+  .board .card--lg .card__pip {
+    display: none;
   }
 
   /* 4) 椭圆收窄，座位只压住桌沿边框，不再整个压到绿色桌面上 */
@@ -4815,9 +4823,10 @@ button,
     transform: translate(-50%, -50%) scale(0.66);
   }
 
-  /* 6) 座位里的牌背在手机上略缩，减少对桌面的遮挡 */
-  .app-shell--ingame .seat__cards .card {
-    width: 26px;
+  /* 6) 座位里的牌略缩，减少对桌面的遮挡。改 --card-w 并同步高度，
+        保持 5:7 比例——只压宽度会得到一张细长条，字直接被裁掉。 */
+  .app-shell--ingame .seat__cards .card--sm {
+    --card-w: 27px;
   }
 }
 
@@ -4834,8 +4843,8 @@ button,
     margin: 4px 0 3px;
   }
 
-  .app-shell--ingame .seat__cards .card {
-    width: 22px;
+  .app-shell--ingame .seat__cards .card--sm {
+    --card-w: 25px;
   }
 
   .app-shell--ingame .seat__description {
