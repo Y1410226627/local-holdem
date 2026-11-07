@@ -17,7 +17,14 @@
 - **真人化决策**：`src/ai/humanModel.ts` 提供跨手公开统计（VPIP / PFR / 攻击性 / 面对下注弃牌率）、情绪、按难度分级的对手利用与真人式失误、fold-equity 近似 EV 尺度；`stateMachine.ts` 在每手结束累计 `statsRaw` 与 `mood`，`aiPlayer.ts` 接入四档决策，座位 HUD 显示跨手画像，LLM 提示词带 `READS` 画像。这些状态只能由公开动作推导，不得读取隐藏信息；改动需更新 `humanModel.test.ts`。
 - **挑战宗师模式（静态分流，不再逐手回退）**：`options.challenge` 下按人数选引擎——单挑翻前用离线 CFR+ 蓝图（只接 BB 防守）+ SB 放宽；单挑河牌 `solveStreetSubgame()`（双边范围、全树遍历全部 combo 同时更新的 vanilla CFR+，含加注）**默认关闭**（`ENABLE_RIVER_SOLVER=true`；配对消融 −4.9~−10.1，CI 含 0）；3 人用旧范围 + 多人谨慎 + 挑战启发式；4–6 人用专家启发式 + 多人谨慎。**禁止**再把挑战动作改回 `expertDecision.action`；`pickChallengeDecision` 已删除。改动需更新 `challenge.test.ts`、`solver.test.ts`、`families.test.ts`。
 - **CFR+ / 翻前蓝图 / 河牌 MCCFR / 按街范围**：`src/ai/solver/` 是新的算法层。`cfr.ts` 提供遗憾匹配+、线性平均、矩阵博弈求解；`abstraction.ts` 按**真实胜率**分 10 个桶（不再用 Chen 分数）并提供牌面纹理 / 组合；`preflop.ts` 在 HU 抽象树上跑 CFR+ 并查 `data/preflop-blueprint.json`（24 桶、SB+BB 双边已接入运行时，SB 树禁用跛入）；`buildBlueprintRangeWeights()` 用蓝图动作频率推出翻后范围（策略一致先验）；`subgameTurn.ts` 做**转+河联合求解**（河牌按牌面分 3 桶、桶内矩阵平均；终点是摊牌，无需价值函数），默认启用；`subgame.ts` 对 HU 河牌做**双边范围 vanilla CFR+**（全树遍历、全部 combo 同时更新；check/bet 33/50/100，fold/call/raise；平均策略跳过前 50% 迭代、前 30 轮按 √T/(√T+1) 折减遗憾），默认关闭；`ranges.ts` 做按街贝叶斯范围更新（已实现，但启发式仍用旧 `buildChallengeRanges`，因为新似然参数下基准更差）；`blueprint.ts` 负责加载。离线生成：`npm run gto:equity` / `npm run gto:blueprint`。**约束**：求解器只接收 `PlayerView` + 自己底牌；不得把 `HandState` / `deck` / `burned` / 对手底牌传进去。改动需更新 `solver.test.ts`。
-- **翻前跟注必须看底池赔率（v0.20.0 起）**：`src/ai/preflopCall.ts` 提供「对加注范围胜率 vs 底池赔率」的判定，
+- **翻前决策必须走 EV 引擎（v0.21.0 起）**：`src/ai/preflopEv.ts` 对 fold / check / call / raise 逐个算期望值取最大，
+  `decidePreflop` 只负责组装输入（范围估计、加注尺度、噪声）。**禁止**再引入「入池线 / 加注线 / 3-bet 线」这类阈值表——
+  它们有三个结构性缺陷：跟注额不参与决策、位置只改阈值不改价值、加注不看弃牌率。
+  EV 公式里四项参数（对手范围、权益实现率、弃牌率、被再加注率）都必须有依据，改动要同步 README 的校准表。
+  **开池阶段禁止跛入**（除非前面有人跛入或单挑 SB）：纯 EV 上跛入看着便宜，但会招来加注且翻后无位置。
+  校准工具：`npm run sweep:preflop`（扫 169 个分类，对照公开 GTO 频率）。改动需更新 `preflopCall.test.ts`。
+
+- **翻前跟注必须看底池赔率（v0.20.0 起，已被 EV 引擎取代）**：`src/ai/preflopCall.ts` 提供「对加注范围胜率 vs 底池赔率」的判定，
   在 `decidePreflop` 里当 `commitFraction >= 0.25` 时接管决策。**禁止**把翻前跟注改回「只看百分位阈值」——
   那会让「面对加注到 40」和「面对 126BB 全下」用同一个跟注范围（真实对局里因此亏掉 5040 的底池）。
   另：`preflopStrength` 必须按**真实胜率**排序（`data/preflop-equity.json`），不能用 Chen 公式——
@@ -138,7 +145,8 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 | `src/ai/challenge.ts` | 挑战宗师：宗师原型 / 读计时与下注细节 / 计时伪装 / range 极化 / EV 尺度 |
 | `src/ai/solver/` | 真 CFR+：`cfr.ts` 原语 / `preflop.ts` 翻前蓝图 / `subgame.ts` 河牌子博弈 / `subgameTurn.ts` 转+河联合 / `ranges.ts` 按街范围 / `abstraction.ts` 真实胜率桶 |
 | `src/ai/exploit.ts` | 剥削层：公开统计 → 价值线 / 诈唬率 / 跟注线；强读时跳过均衡求解 |
-| `src/ai/preflopCall.ts` | 翻前数学判定：对手范围估计 + 对范围胜率 + 底池赔率 |
+| `src/ai/preflopCall.ts` | 翻前范围估计 + 对范围胜率的蒙特卡洛 |
+| `src/ai/preflopEv.ts` | 翻前 EV 引擎：逐动作算期望值，取代阈值表 |
 | `src/ai/gto.ts` | GTO 频率公式 / 短码 push-fold / EV 尺度混合（保留为启发式层） |
 | `src/ai/gtoTable.ts` | B1：离线 push/fold 策略表加载 + 筹码深度插值 |
 | `src/ai/gtoAdvice.ts` | B1：短码单挑建议（查表优先，表外回退在线求解） |

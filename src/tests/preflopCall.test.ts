@@ -116,7 +116,8 @@ describe('决策：面对全下必须弃掉 J9o、跟注 AA', () => {
     expect(view.legal?.callAmount).toBe(2430);
     const decision = await decide(view, 'expert', { challenge: true, maxIterations: 400 });
     expect(decision.action.type).toBe('fold');
-    expect(decision.debug.reasoning).toContain('翻前数学判定');
+    // v0.21 起翻前统一走 EV 引擎，推理里会列出各动作的期望值
+    expect(decision.debug.reasoning).toContain('EV：');
   });
 
   it('AA 面对全下：跟注', async () => {
@@ -125,7 +126,7 @@ describe('决策：面对全下必须弃掉 J9o、跟注 AA', () => {
     expect(['call', 'allin']).toContain(decision.action.type);
   });
 
-  it('小额加注（不占筹码）不走「数学判定」分支，保持原有范围纪律', async () => {
+  it('小额加注（不占筹码）由 EV 引擎处理，不会因为跟注额小而乱打', async () => {
     // 深筹码、只面对一个 90 的加注（跟 70 占筹码 0.7%），
     // 应该继续用百分位规则，而不是每次都跑蒙特卡洛
     const seed = 'preflop-call-small-raise';
@@ -142,6 +143,9 @@ describe('决策：面对全下必须弃掉 J9o、跟注 AA', () => {
     const view = buildPlayerView(hand, 0, seed);
     expect(view.legal?.callAmount).toBe(70);
     const decision = await decide(view, 'expert', { challenge: true, maxIterations: 400 });
-    expect(decision.debug.reasoning).not.toContain('翻前数学判定');
+    // 关键是「EV 引擎真的跑了」：推理里会列出弃牌/跟注/加注各自的期望值。
+    // 具体动作不锁死——J9o 在这里权益 38.8%、底池赔率 38.9%，本来就是边缘牌。
+    expect(decision.debug.reasoning).toContain('EV：');
+    expect(decision.debug.reasoning).toContain('弃牌率');
   });
 });

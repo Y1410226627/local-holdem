@@ -15,6 +15,7 @@
  */
 import type { Card, Difficulty, LegalActions, PlayerAction } from '../game/types';
 import { equityVsTopRange, estimateRaiserRange } from './preflopCall';
+import { evaluatePreflop } from './preflopEv';
 import type { PlayerView } from '../game/playerView';
 import { derivedRng } from '../game/cards';
 import {
@@ -470,26 +471,7 @@ function decidePreflop(
     }
   }
   const positionText = POSITION_LABELS[position];
-  // 真人化：面对 3-bet / 多人加注时收紧范围；晚位对多人溜入便宜看牌时小幅放宽。
-  const baseThresholds = preflopThresholdsForProfile(profile, position);
   const raiseCount = countRaisesThisStreet(view);
-  const tighten = facingRaise
-    ? Math.min(0.2, 0.05 + Math.max(0, raiseCount - 1) * 0.045)
-    : 0;
-  const limpers = countLimpers(view);
-  const loosen = !facingRaise && limpers >= 2 && position === 'late' ? 0.03 : 0;
-  const thresholds: PreflopThresholds =
-    tighten === 0 && loosen === 0
-      ? baseThresholds
-      : {
-          play: clamp01(baseThresholds.play + tighten - loosen),
-          raise: clamp01(
-            Math.max(baseThresholds.play + tighten - loosen, baseThresholds.raise + tighten),
-          ),
-          threeBet: clamp01(
-            Math.max(baseThresholds.raise + tighten, baseThresholds.threeBet + tighten),
-          ),
-        };
 
   if (difficulty === 'beginner' && !ctx.challenge) {
     // 入门 AI：完全按起手牌强度查表，不看位置；只小额跟注，极少加注。
@@ -539,90 +521,99 @@ function decidePreflop(
     return { action, reasoning };
   }
 
-  // normal / hard / expert：范围表 + 位置阈值 + 混合策略。
-  const positionFactor =
-    position === 'late' ? 1.15 : position === 'blinds' ? 0.8 : position === 'middle' ? 1 : 0.9;
-  const bluffRaise =
-    strength < thresholds.play &&
-    rng() < profile.preflop.bluffRaiseRate * positionFactor;
-  const mixRaise =
-    strength >= thresholds.play &&
-    strength < thresholds.raise &&
-    rng() < profile.preflop.mixRaiseRate;
-  const trap =
-    strength >= thresholds.threeBet && rng() < profile.preflop.trapRate;
-  const wantRaise = (strength >= thresholds.raise || mixRaise || bluffRaise) && !trap;
-
-  // ── 面对大幅加注：用「对加注范围的胜率 vs 底池赔率」判定，而不是查百分位表 ──
+  // normal / hard / expert / challenge：逐动作算 EV，取最大。
   //
-  // 旧实现只有 `strength >= thresholds.play` 一个条件，跟注额完全不参与决策：
-  // 面对「加注到 40」和「全下 2520」用的是同一个跟注范围。
-  // 实测后果：6 人桌有人 126BB 全下，机器人拿 J9o（对全下范围约 30%）跟了 2430。
-  if (facingRaise && legal.canCall) {
-    const commitFraction =
-      legal.callAmount / Math.max(1, view.self.stack + view.self.totalCommitted);
-    if (commitFraction >= 0.25) {
-      const hero = view.self.holeCards as [Card, Card];
-      const rangePercentile = estimateRaiserRange({
-        commitFraction,
-        avgPfr: ctx.opponents.avgPfr,
-        raiseCount,
-      });
-      const equity = equityVsTopRange(hero, rangePercentile, rng, 200);
-      const callOk = equity >= ctx.potOdds + 0.005;
-      const action: PlayerAction = callOk
-        ? { type: 'call' }
-        : legal.canFold
-          ? { type: 'fold' }
-          : { type: 'call' };
-      const reasoning =
-        `${reasonTagOf(ctx, difficulty)}：翻前数学判定——起手牌 ${key}，` +
-        `要跟 ${legal.callAmount}（占自己筹码 ${(commitFraction * 100).toFixed(0)}%），` +
-        `估计对手范围前 ${(rangePercentile * 100).toFixed(0)}%，` +
-        `我方对该范围胜率 ${(equity * 100).toFixed(1)}%，底池赔率需要 ${(ctx.potOdds * 100).toFixed(1)}% → ` +
-        `${callOk ? '跟注' : '弃牌'}。`;
-      return { action, reasoning };
+  // 旧实现是三层阈值表（入池线 / 加注线 / 3-bet 线）+ 随机混合系数，有三个结构性缺陷：
+  //   ① 跟注额不参与决策（ctx.potOdds 在翻前一次都没被读过）；
+  //   ② 位置只改阈值高低，不改「这手牌在这个位置值多少钱」；
+  //   ③ 加注只看牌力、不看弃牌率——对手从不弃牌时加注毫无意义。
+  const hero = view.self.holeCards as [Card, Card];
+  const commitFraction =
+    legal.callAmount / Math.max(1, view.self.stack + view.self.totalCommitted);
+  // 无人加注时用「宽范围」占位（开池面对的是盲注的随机牌）
+  const raiserRange = facingRaise
+    ? estimateRaiserRange({ commitFraction, avgPfr: ctx.opponents.avgPfr, raiseCount })
+    : 0.6;
+  const raiseTo = facingRaise ? threeBetTarget(ctx, profile) : openRaiseTarget(ctx, profile);
+  const opponentCount = Math.max(1, countOpponents(view));
+
+  const evResult = evaluatePreflop({
+    hero,
+    pot: view.pot,
+    callAmount: legal.callAmount,
+    stack: view.self.stack,
+    committed: view.self.totalCommitted,
+    minRaiseTo: legal.minRaiseTo,
+    maxRaiseTo: legal.maxRaiseTo,
+    canCheck: legal.canCheck,
+    canCall: legal.canCall,
+    canRaise: legal.canRaise,
+    raiseTo,
+    raiserRange,
+    raiseCount,
+    opponentCount,
+    foldToBet: ctx.opponents.avgFoldToBet,
+    position,
+    // 开池阶段（无人加注且前面没人跛入）不存在「跟注」这个选项：
+    // 跛入在纯 EV 上看着便宜（3:1 赔率），但会招来加注、且翻后无位置，
+    // 实测让引擎在 6 人桌 UTG 跛入 35%——现实中这是明显漏洞。
+    allowLimp: facingRaise || countLimpers(view) >= 1 || (position === 'blinds' && opponentCount === 1),
+    rng,
+    samples: 200,
+  });
+
+  // 能过牌时不存在「弃牌」这个选项（弃牌 EV 恒为 0，会被噪声误选）
+  const candidates = evResult.options.filter(
+    (option) => !(option.kind === 'fold' && legal.canCheck),
+  );
+
+  // 难度 = 决策噪声：低难度偶尔会挑到更差的动作，这就是「人味」的来源，
+  // 也保证入门/普通/困难/专家/挑战是一条单调的能力梯度。
+  // 单位是筹码：挑战档 8（≈0.4BB）几乎不影响正确决策，入门档 180（≈9BB）会经常打错。
+  const noiseScale =
+    difficulty === 'beginner'
+      ? 180
+      : difficulty === 'normal'
+        ? 110
+        : difficulty === 'hard'
+          ? 45
+          : ctx.challenge
+            ? 8
+            : 16;
+  let chosen = candidates[0] ?? evResult.options[0];
+  let bestScore = -Infinity;
+  for (const option of candidates) {
+    const score = option.ev + (rng() * 2 - 1) * noiseScale;
+    if (score > bestScore) {
+      bestScore = score;
+      chosen = option;
     }
   }
 
-  const target = facingRaise
-    ? threeBetTarget(ctx, profile)
-    : openRaiseTarget(ctx, profile);
-  const aggressive = wantRaise ? buildAggressive(legal, target) : null;
+  const fallback = (): PlayerAction =>
+    legal.canCheck ? { type: 'check' } : legal.canFold ? { type: 'fold' } : { type: 'call' };
 
   let action: PlayerAction;
-  if (aggressive) {
-    action = aggressive;
-  } else if (strength >= thresholds.play) {
-    action = legal.canCall
-      ? { type: 'call' }
-      : legal.canCheck
-        ? { type: 'check' }
-        : { type: 'fold' };
-  } else if (legal.canCheck) {
-    action = { type: 'check' };
+  if (chosen.kind === 'raise') {
+    action = buildAggressive(legal, chosen.amount ?? raiseTo) ?? fallback();
+  } else if (chosen.kind === 'call') {
+    action = legal.canCall ? { type: 'call' } : fallback();
+  } else if (chosen.kind === 'check') {
+    action = legal.canCheck ? { type: 'check' } : fallback();
   } else {
-    action = { type: 'fold' };
+    action = legal.canFold ? { type: 'fold' } : fallback();
   }
 
-  const actionText =
-    action.type === 'raise' || action.type === 'allin'
-      ? facingRaise
-        ? '再加注'
-        : '开池加注'
-      : action.type === 'call'
-        ? '跟注'
-        : action.type === 'check'
-          ? '过牌'
-          : '弃牌';
-  const reasonTag = reasonTagOf(ctx, difficulty);
-
+  const kindLabel = (kind: string): string =>
+    kind === 'raise' ? '加注' : kind === 'call' ? '跟注' : kind === 'check' ? '过牌' : '弃牌';
+  const evText = evResult.options
+    .map((option) => `${kindLabel(option.kind)}${option.amount ? '@' + option.amount : ''} ${option.ev.toFixed(0)}`)
+    .join(' / ');
   const reasoning =
-    `${reasonTag}：${positionText}起手牌 ${key} 强度 ${strength.toFixed(2)}；` +
-    `入池线 ${thresholds.play.toFixed(2)}、加注线 ${thresholds.raise.toFixed(2)}、` +
-    `3-bet 线 ${thresholds.threeBet.toFixed(2)}；` +
-    `${facingRaise ? '面对加注' : '无人加注'}，${actionText}` +
-    `${bluffRaise ? '（弱牌偷加注）' : mixRaise ? '（中等牌混合加注）' : trap ? '（强牌慢玩）' : ''}。`;
+    `${reasonTagOf(ctx, difficulty)}：${positionText}起手牌 ${key}，` +
+    `对范围前 ${(raiserRange * 100).toFixed(0)}% 的权益 ${(evResult.equity * 100).toFixed(1)}%，` +
+    `权益实现率 ${evResult.realization.toFixed(2)}，弃牌率 ${(evResult.foldEquity * 100).toFixed(0)}%；` +
+    `EV：${evText} → ${kindLabel(chosen.kind)}。`;
   return { action, reasoning };
 }
 
