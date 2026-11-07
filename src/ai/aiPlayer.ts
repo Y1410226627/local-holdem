@@ -16,6 +16,7 @@
 import type { Card, Difficulty, LegalActions, PlayerAction } from '../game/types';
 import { equityVsTopRange, estimateRaiserRange } from './preflopCall';
 import { evaluatePreflop } from './preflopEv';
+import { flopAdvice } from './solver/flopBlueprint';
 import type { PlayerView } from '../game/playerView';
 import { derivedRng } from '../game/cards';
 import {
@@ -147,6 +148,8 @@ export interface AIDecisionOptions {
   preflopExploit?: boolean;
   /** 是否启用剥削层（基准消融用；默认 true）。关闭后完全回到旧常量阈值。 */
   exploit?: boolean;
+  /** 是否使用离线翻牌蓝图（消融用；默认 true）。 */
+  flopBlueprint?: boolean;
   /** 单挑 SB 是否放宽开池（基准消融用；默认 true）。 */
   sbWide?: boolean;
   /** 单挑 SB 翻前参数覆盖（基准消融用；默认 HU_SB_PREFLOP）。 */
@@ -182,6 +185,7 @@ export interface AIDebugInfo {
     | 'cfr-turn-river'
     | 'preflop-blueprint'
     | 'preflop-exploit'
+    | 'flop-blueprint'
     | 'challenge-multiway'
     | 'heuristic';
   /** 大模型名称（source === 'llm' 时）。 */
@@ -1556,6 +1560,7 @@ async function decideCore(
     | 'cfr-turn-river'
     | 'preflop-blueprint'
     | 'preflop-exploit'
+    | 'flop-blueprint'
     | 'challenge-multiway'
     | 'heuristic' = 'heuristic';
 
@@ -1708,6 +1713,54 @@ async function decideCore(
     let result: PostflopResult | null = null;
     if (challenge) {
       const rounds = resolveIterations(profile, options);
+      // 单挑翻牌：查离线 CFR+ 蓝图（A 路线）。只覆盖「SB 加注 / BB 跟注」的单加注底池，
+      // 纹理桶没命中或局面不在覆盖范围时返回 null，回退启发式。
+      // 默认**关闭**：1200 手配对消融 −19 BB/100（CI [−50.1, 12.1]），点估计为负。
+      // 原因与 v0.16 翻前蓝图一致：蓝图的叶子用「权益 × 底池 × 固定实现率」估终局，
+      // 而实际引擎的转河打法不是那个模型，抽象越细反而越偏。
+      // 要启用需要先把终局估值换成真实求解（B 路线的价值函数），用 flopBlueprint: true 显式打开。
+      if (
+        view.street === 'flop' &&
+        activeOpponents === 1 &&
+        options.flopBlueprint === true &&
+        !solvedByCfr
+      ) {
+        const streetActions = view.actions.filter((record) => record.street === 'flop');
+        const advice = flopAdvice(view.board, view.self.holeCards, streetActions);
+        if (advice) {
+          let roll = rng();
+          let pick = 0;
+          for (let index = 0; index < advice.strategy.length; index++) {
+            roll -= advice.strategy[index];
+            if (roll <= 0) { pick = index; break; }
+          }
+          const name = advice.actions[pick] ?? advice.actions[0];
+          const pot = Math.max(1, view.pot);
+          const amountFor = (fraction: number) =>
+            Math.max(legal.minRaiseTo, Math.min(legal.maxRaiseTo, Math.round(pot * fraction)));
+          let mapped: PlayerAction | null = null;
+          if (name === 'check' && legal.canCheck) mapped = { type: 'check' };
+          else if (name === 'fold' && legal.canFold) mapped = { type: 'fold' };
+          else if (name === 'call' && legal.canCall) mapped = { type: 'call' };
+          else if (legal.aggressiveType) {
+            if (name === 'raise') {
+              mapped = buildAggressive(legal, Math.round(view.currentBet * 2.5));
+            } else if (name === 'bet_33') mapped = buildAggressive(legal, amountFor(0.33));
+            else if (name === 'bet_66') mapped = buildAggressive(legal, amountFor(0.66));
+            else if (name === 'bet_100') mapped = buildAggressive(legal, amountFor(1));
+          }
+          if (mapped) {
+            solvedByCfr = true;
+            decisionSource = 'flop-blueprint';
+            result = {
+              action: mapped,
+              reasoning:
+                `挑战（翻牌 CFR+ 蓝图）：纹理桶 ${advice.flopBucket} / 手牌桶 ${advice.handBucket}，` +
+                `节点 ${advice.node}，选择 ${name}（均衡频率 ${((advice.strategy[pick] ?? 0) * 100).toFixed(0)}%）。`,
+            };
+          }
+        }
+      }
       // 强读时放弃均衡解：CFR 子博弈假设对手按均衡打，
       // 对一个「从不弃牌」的跟注站，均衡打法恰恰不是最优（实测转牌下注率只有 8%）。
       // 这时剥削收益远大于「不被利用」的价值。
