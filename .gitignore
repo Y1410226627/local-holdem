@@ -32,3 +32,9 @@ release/
 
 # 单文件 HTML 构建产物
 dist-single/
+
+# 「我亲自下场」的动作列表
+.play-actions.json
+
+# 手机截图对比（临时产物）
+.shot-*.png

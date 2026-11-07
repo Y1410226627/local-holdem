@@ -117,20 +117,27 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 7. **体验随机**：风格/随机化只能小幅调整合法动作与参数，不得破坏难度档差异、不得读取隐藏信息；所有新增随机必须走种子派生流。真人化层（跨手统计 / 情绪 / 真人式失误）同样只能基于公开动作与自己的状态，不得利用隐藏信息。
 8. 不要改动启动脚本的编码/权限约定：`.bat` 为 **UTF-8 无 BOM + CRLF**；`.sh` / `.command` 为 **LF**，且 `.command` / `.sh` 在 git 索引中需要保留可执行位（`chmod +x` / `git update-index --chmod=+x`）。
 9. **版本号（每次提交必做）**：提交前同步递增 `package.json` 与 `package-lock.json` 的 `version`，并让版本号与本次改动在同一个提交里（当前 v0.15.x：修复 / 文档 / 微调递增补丁号，成块功能递增次版本）；提交信息带上版本号。详见 [README.md](README.md)「版本号约定」。
-10. **手机适配**：改 UI / CSS 不得破坏手机布局——≤820px 宽必须保持「牌桌 + 操作区一屏」（`.app-shell--ingame`）、设置栏收进抽屉、触摸目标 ≥46px、安全区 `env(safe-area-inset-*)` 与 `viewport-fit=cover`；桌面 1440×900 不得回归。相关判定在 `src/ui/mobile.ts`，手机样式追加在 `src/ui/styles.css` 末尾「手机 / 平板适配」分区，改动需更新 `mobile.test.ts`。
-11. **Windows 桌面版（可选，与 APK 独立）**：`electron/main.cjs` 是主进程（本地 HTTP 服务 + BrowserWindow），
+10. **手机 5/6 人桌布局（v0.22.0 起）**：四条不能回退的约束，改动前先用 `npm run shot:mobile` 出图对比：
+    ①行牌提示条在手机端必须**随文档流**（不能 `position: fixed` 盖住工具栏与顶部座位）；
+    ②中央 `.table-status` 在手机端**隐藏**——它和底部操作区完全重复，且正好压在左右座位上；
+    ③牌桌椭圆必须**窄于座位环**，否则座位整块压在绿色桌面上；
+    ④公共牌 `clamp(30px, 7.4vw, 40px)`，再大会和左右座位贴在一起。
+    验证工具：`npm run shot:mobile -- <png> [人数] [宽] [高]`（Electron 以真机尺寸渲染截图）。
+
+11. **手机适配**：改 UI / CSS 不得破坏手机布局——≤820px 宽必须保持「牌桌 + 操作区一屏」（`.app-shell--ingame`）、设置栏收进抽屉、触摸目标 ≥46px、安全区 `env(safe-area-inset-*)` 与 `viewport-fit=cover`；桌面 1440×900 不得回归。相关判定在 `src/ui/mobile.ts`，手机样式追加在 `src/ui/styles.css` 末尾「手机 / 平板适配」分区，改动需更新 `mobile.test.ts`。
+12. **Windows 桌面版（可选，与 APK 独立）**：`electron/main.cjs` 是主进程（本地 HTTP 服务 + BrowserWindow），
     `electron-builder.yml` 是打包配置。**三条不能改的约束**：
     ①页面必须走本地 HTTP，不能改 `file://`（Vite 产物是绝对路径，会白屏）；
     ②`electronDist` 必须指向 `node_modules/electron/dist`，否则打包时会去 GitHub 下载并在需要代理的网络下静默卡死；
     ③`createDesktopShortcut` 必须是 `always`，否则静默安装不建桌面图标。
     改动后跑冒烟：`HOLDEM_SMOKE=1 HOLDEM_SMOKE_OUT=<文件> npx electron .`，必须输出 `SMOKE_OK`。
 
-12. **单文件 HTML（跨平台兜底）**：`vite.config.single.ts` + `scripts/build-single.mjs`。
+13. **单文件 HTML（跨平台兜底）**：`vite.config.single.ts` + `scripts/build-single.mjs`。
     它把 JS/CSS 全部内联，并删掉 `manifest` / `apple-touch-icon` 两个外部 `<link>`，
     保证 `file://` 下零请求。**约束**：不要给它加任何需要网络请求的资源（字体、CDN、图片外链），
     否则双击打开就会挂。改动后必须跑 `scripts/smoke-single.cjs` 验证 `SINGLE_OK`。
 
-13. **安卓 APK（每次版本更新必做）**：每个版本都要重新执行 `npm run apk` 并更新 `apk/` 目录（只保留当前版本文件），APK 的 versionName 由 `package.json` 自动生成；不要提交签名密钥（默认在 `C:\AndroidToolchain\keystore\`，已在 `android/.gitignore` 忽略）。
+14. **安卓 APK（每次版本更新必做）**：每个版本都要重新执行 `npm run apk` 并更新 `apk/` 目录（只保留当前版本文件），APK 的 versionName 由 `package.json` 自动生成；不要提交签名密钥（默认在 `C:\AndroidToolchain\keystore\`，已在 `android/.gitignore` 忽略）。
 
 ## 目录速览
 

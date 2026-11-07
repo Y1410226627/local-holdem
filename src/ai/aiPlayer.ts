@@ -569,20 +569,23 @@ function decidePreflop(
 
   // 难度 = 决策噪声：低难度偶尔会挑到更差的动作，这就是「人味」的来源，
   // 也保证入门/普通/困难/专家/挑战是一条单调的能力梯度。
-  // 单位是筹码：挑战档 8（≈0.4BB）几乎不影响正确决策，入门档 180（≈9BB）会经常打错。
+  // 单位是筹码。挑战档必须压到很小：实测 8 筹码（0.4BB）就足以把
+  // 「加注 EV +2 / 弃牌 EV 0」这种正期望决策翻成弃牌，日志还会自相矛盾。
   const noiseScale =
     difficulty === 'beginner'
-      ? 180
+      ? 170
       : difficulty === 'normal'
-        ? 110
+        ? 100
         : difficulty === 'hard'
-          ? 45
+          ? 40
           : ctx.challenge
-            ? 8
-            : 16;
+            ? 3
+            : 12;
   let chosen = candidates[0] ?? evResult.options[0];
+  let pureBest = chosen;
   let bestScore = -Infinity;
   for (const option of candidates) {
+    if (option.ev > pureBest.ev) pureBest = option;
     const score = option.ev + (rng() * 2 - 1) * noiseScale;
     if (score > bestScore) {
       bestScore = score;
@@ -613,7 +616,12 @@ function decidePreflop(
     `${reasonTagOf(ctx, difficulty)}：${positionText}起手牌 ${key}，` +
     `对范围前 ${(raiserRange * 100).toFixed(0)}% 的权益 ${(evResult.equity * 100).toFixed(1)}%，` +
     `权益实现率 ${evResult.realization.toFixed(2)}，弃牌率 ${(evResult.foldEquity * 100).toFixed(0)}%；` +
-    `EV：${evText} → ${kindLabel(chosen.kind)}。`;
+    `EV：${evText} → ${kindLabel(chosen.kind)}` +
+    // 噪声让低难度偶尔不选最高 EV 的动作，这里如实标注，避免日志看起来自相矛盾
+    (chosen.kind !== pureBest.kind || chosen.amount !== pureBest.amount
+      ? `（决策噪声：纯 EV 最高的是 ${kindLabel(pureBest.kind)} ${pureBest.ev.toFixed(0)}）`
+      : '') +
+    '。';
   return { action, reasoning };
 }
 
