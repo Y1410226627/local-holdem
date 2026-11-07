@@ -277,6 +277,16 @@ export interface FlopSolveInput {
   iterations?: number;
   potBB?: number;
   stackBB?: number;
+  /**
+   * 叶子估值（SB 视角，单位筹码）。给了就用它替代「权益 × 底池 × 固定实现率」。
+   * B 路线（价值网络）就是从这里接进来的。
+   */
+  leafEv?: (input: {
+    flop: number;
+    sbHand: number;
+    bbHand: number;
+    terminal: FlopTerminal;
+  }) => number;
 }
 
 export function solveFlopBlueprint(input: FlopSolveInput): FlopBlueprint {
@@ -313,6 +323,9 @@ export function solveFlopBlueprint(input: FlopSolveInput): FlopBlueprint {
     iteration: number,
   ): number => {
     if (!('player' in node)) {
+      if (input.leafEv) {
+        return input.leafEv({ flop, sbHand, bbHand, terminal: node });
+      }
       return flopTerminalEv(node, input.equity[flop][sbHand][bbHand]);
     }
     const hand = node.player === 'sb' ? sbHand : bbHand;

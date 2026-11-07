@@ -11,7 +11,7 @@
  * 用法：npx tsx scripts/generate-flop-blueprint.ts
  *      ITERATIONS=400 BUCKETS=48 npx tsx scripts/generate-flop-blueprint.ts
  */
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { createDeck, shuffle } from '../src/game/cards';
 import type { Card } from '../src/game/types';
 import { showdownSign } from '../src/ai/solver/abstraction';
@@ -19,13 +19,18 @@ import {
   FLOP_HAND_BUCKETS,
   flopHandBucket,
   flopTextureKey,
+  flopTerminalEv,
   solveFlopBlueprint,
+  type FlopTerminal,
 } from '../src/ai/solver/flopBlueprint';
+import { turnValueForward, type TurnValueWeights } from '../src/ai/solver/turnValue';
 
 const ITERATIONS = Number(process.env.ITERATIONS ?? 400);
 const MAX_BUCKETS = Number(process.env.BUCKETS ?? 48);
 const HANDS_PER_BUCKET = Number(process.env.HANDS_PER_BUCKET ?? 10);
 const MC_PER_PAIR = Number(process.env.MC ?? 40);
+/** 单加注底池的剩余筹码（BB）：100BB − 3BB 开池。 */
+const STACK_BB = 97;
 
 const deck = createDeck();
 
@@ -136,9 +141,64 @@ bucketBoards.forEach((board, index) => {
 });
 console.log(`权益矩阵完成：${((Date.now() - started) / 1000).toFixed(1)}s`);
 
-/* 4) CFR+ */
+/* 4) CFR+（可选：用价值网络当叶子估值） */
+const USE_NET = process.env.USE_NET === '1';
+let netWeights: TurnValueWeights | null = null;
+if (USE_NET) {
+  try {
+    const raw = JSON.parse(readFileSync('src/ai/data/turn-value.json', 'utf8')) as {
+      weights: TurnValueWeights;
+      testR2: number;
+    };
+    netWeights = raw.weights;
+    console.log(`叶子估值改用价值网络（留出集 R² ${raw.testR2}）`);
+  } catch {
+    console.log('读不到 turn-value.json，回退固定实现率');
+  }
+}
+
+const boardHighOf = (key: string): number => {
+  const band = key.split('|')[2];
+  if (band === 'A') return 1;
+  if (band === 'K') return 13 / 14;
+  if (band === 'Q') return 12 / 14;
+  if (band === 'JT') return 11 / 14;
+  if (band === '98') return 9 / 14;
+  return 6 / 14;
+};
+const pairedOf = (key: string): number => (key.startsWith('P') ? 1 : 0);
+
 const solveStart = Date.now();
-const blueprint = solveFlopBlueprint({ bucketBoards, equity, iterations: ITERATIONS });
+const blueprint = solveFlopBlueprint({
+  bucketBoards,
+  equity,
+  iterations: ITERATIONS,
+  leafEv: netWeights
+    ? ({ flop, sbHand, bbHand, terminal }: { flop: number; sbHand: number; bbHand: number; terminal: FlopTerminal }) => {
+        // 弃牌结局与网络无关，沿用原来的记账
+        if (terminal.kind === 'fold') return flopTerminalEv(terminal, equity[flop][sbHand][bbHand]);
+        const pot = Math.max(1, terminal.pot);
+        const eq = equity[flop][sbHand][bbHand];
+        const features = [
+          (sbHand + 0.5) / FLOP_HAND_BUCKETS, // 成牌强度（用桶中点近似）
+          (sbHand + 0.5) / FLOP_HAND_BUCKETS,
+          0, // 听牌未知
+          0,
+          pairedOf(textureKeys[flop]),
+          eq > 0.5 ? 1 : 0, // 超对代理：权益过半
+          pot / 200,
+          0, // 转牌起点无人下注
+          Math.max(0, STACK_BB - terminal.investSb) / pot / 10,
+          0.5, // 转牌未知
+          boardHighOf(textureKeys[flop]),
+          0,
+        ];
+        const evPerPot = turnValueForward(features, netWeights as TurnValueWeights);
+        // 网络给的是「从转牌起还值多少」，减掉本街投入才是本街净收益
+        return evPerPot * pot - terminal.investSb;
+      }
+    : undefined,
+});
 console.log(`CFR+ ${ITERATIONS} 次迭代：${((Date.now() - solveStart) / 1000).toFixed(1)}s，信息集 ${blueprint.entries.length}`);
 
 /* 5) 导出 */

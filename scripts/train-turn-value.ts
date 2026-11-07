@@ -25,6 +25,8 @@ const SAMPLES = Number(process.env.SAMPLES ?? 600);
 const EPOCHS = Number(process.env.EPOCHS ?? 3000);
 const LR = Number(process.env.LR ?? 0.02);
 const SOLVER_ITERATIONS = Number(process.env.SOLVER_ITERATIONS ?? 120);
+const SOLVER_COMBOS = Number(process.env.SOLVER_COMBOS ?? 16);
+const OUT_FILE = process.env.OUT ?? 'src/ai/data/turn-value.json';
 
 const rng = derivedRng('turn-value-train');
 const pick = <T>(list: readonly T[]): T => list[Math.floor(rng() * list.length)];
@@ -75,7 +77,7 @@ for (let index = 0; index < SAMPLES; index++) {
   if (!view) continue;
   const solved = solveTurnRiver(view, {
     iterations: SOLVER_ITERATIONS,
-    maxCombos: 16,
+    maxCombos: SOLVER_COMBOS,
     riverBuckets: 3,
   });
   if (!solved) continue;
@@ -200,5 +202,5 @@ const payload = {
   hidden: TURN_VALUE_HIDDEN,
   weights,
 };
-writeFileSync('src/ai/data/turn-value.json', JSON.stringify(payload), 'utf8');
-console.log('已写入 src/ai/data/turn-value.json');
+writeFileSync(OUT_FILE, JSON.stringify(payload), 'utf8');
+console.log(`已写入 ${OUT_FILE}`);
