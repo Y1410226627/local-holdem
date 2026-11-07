@@ -19,7 +19,9 @@
     "bench": "tsx scripts/bench-ai.ts",
     "gto:equity": "tsx scripts/generate-preflop-equity.ts",
     "gto:blueprint": "tsx scripts/generate-preflop-blueprint.ts",
-    "audit:exploit": "tsx scripts/audit-exploit.ts"
+    "audit:exploit": "tsx scripts/audit-exploit.ts",
+    "exe": "npm run build && electron-builder --win nsis",
+    "exe:portable": "npm run build && electron-builder --win portable"
   },
   "dependencies": {
     "@capacitor/android": "^7.6.10",
@@ -28,13 +30,17 @@
     "react-dom": "^19.3.1"
   },
   "devDependencies": {
+    "@capacitor/cli": "^7.6.10",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.2.1",
-    "@capacitor/cli": "^7.6.10",
+    "electron": "^45.2.3",
+    "electron-builder": "^26.18.0",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vite": "^8.3.5",
     "vitest": "^5.1.0"
-  }
+  },
+  "main": "electron/main.cjs",
+  "author": "Local Holdem"
 }

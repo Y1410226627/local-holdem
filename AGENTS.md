@@ -79,6 +79,7 @@ node scripts/setup.mjs --check          # 只检查环境（启动器内部使�
 | 构建 | `npm run build` | 生成 `dist/`，退出码 0 |
 | 训练冒烟 | `npm run train -- --rounds=1 --seed=agent-smoke` | 约 2–4 秒，退出码 0 |
 | 打包 APK（可选） | `npm run apk` | 输出 `APK_RESULT=OK`，生成 `apk/德州扑克-v<version>.apk`（首次约 2–5 分钟） |
+| 打包 Windows 桌面版（可选） | `npm run exe` | 生成 `release/Holdem-Setup-<version>.exe`（约 117 MB）；`release/` 已 gitignore |
 
 ## 启动与冒烟检查
 
@@ -103,7 +104,14 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 8. 不要改动启动脚本的编码/权限约定：`.bat` 为 **UTF-8 无 BOM + CRLF**；`.sh` / `.command` 为 **LF**，且 `.command` / `.sh` 在 git 索引中需要保留可执行位（`chmod +x` / `git update-index --chmod=+x`）。
 9. **版本号（每次提交必做）**：提交前同步递增 `package.json` 与 `package-lock.json` 的 `version`，并让版本号与本次改动在同一个提交里（当前 v0.15.x：修复 / 文档 / 微调递增补丁号，成块功能递增次版本）；提交信息带上版本号。详见 [README.md](README.md)「版本号约定」。
 10. **手机适配**：改 UI / CSS 不得破坏手机布局——≤820px 宽必须保持「牌桌 + 操作区一屏」（`.app-shell--ingame`）、设置栏收进抽屉、触摸目标 ≥46px、安全区 `env(safe-area-inset-*)` 与 `viewport-fit=cover`；桌面 1440×900 不得回归。相关判定在 `src/ui/mobile.ts`，手机样式追加在 `src/ui/styles.css` 末尾「手机 / 平板适配」分区，改动需更新 `mobile.test.ts`。
-11. **安卓 APK（每次版本更新必做）**：每个版本都要重新执行 `npm run apk` 并更新 `apk/` 目录（只保留当前版本文件），APK 的 versionName 由 `package.json` 自动生成；不要提交签名密钥（默认在 `C:\AndroidToolchain\keystore\`，已在 `android/.gitignore` 忽略）。
+11. **Windows 桌面版（可选，与 APK 独立）**：`electron/main.cjs` 是主进程（本地 HTTP 服务 + BrowserWindow），
+    `electron-builder.yml` 是打包配置。**三条不能改的约束**：
+    ①页面必须走本地 HTTP，不能改 `file://`（Vite 产物是绝对路径，会白屏）；
+    ②`electronDist` 必须指向 `node_modules/electron/dist`，否则打包时会去 GitHub 下载并在需要代理的网络下静默卡死；
+    ③`createDesktopShortcut` 必须是 `always`，否则静默安装不建桌面图标。
+    改动后跑冒烟：`HOLDEM_SMOKE=1 HOLDEM_SMOKE_OUT=<文件> npx electron .`，必须输出 `SMOKE_OK`。
+
+12. **安卓 APK（每次版本更新必做）**：每个版本都要重新执行 `npm run apk` 并更新 `apk/` 目录（只保留当前版本文件），APK 的 versionName 由 `package.json` 自动生成；不要提交签名密钥（默认在 `C:\AndroidToolchain\keystore\`，已在 `android/.gitignore` 忽略）。
 
 ## 目录速览
 
@@ -146,6 +154,7 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 - [ ] Node.js 检测语义：已有 Node 时启动器直接跳过安装；缺 Node + `--agent` 时 exit 1 且不安装（需要自动装时用 `--install-node`）
 - [ ] `package.json` 版本号已按约定递增（当前 v0.15.x），并与本次改动在同一个提交
 - [ ] `npm run apk` 退出码 0 且输出 `APK_RESULT=OK`；`apk/` 内只有与 `package.json` 版本一致的 APK
+- [ ] （若本次改了前端）`npm run exe` 退出码 0；`release/Holdem-Setup-<version>.exe` 存在；用冒烟模式跑打包后的 `release/win-unpacked/德州扑克.exe` 输出 `SMOKE_OK`
 - [ ] APK 冒烟：`aapt2 dump badging` 的 versionName 与 `package.json` 一致、label 为「德州扑克」；`apksigner verify` 通过（release 签名）
 - [ ] 手机布局冒烟：390×844 / 360×640 / 844×390 下进行中牌桌与操作区一屏（无纵向滚动 / 横向溢出），桌面 1440×900 正常
 - [ ] 一键同步数据冒烟：`node scripts/sync-data.mjs --help` 退出码 0；`--list` 能识别同级旧版本目录

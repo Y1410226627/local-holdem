@@ -114,6 +114,47 @@ npm run apk:debug    # debug 包（排查用）
 - 电脑运行 `npm run dev -- --host 0.0.0.0`，手机和电脑连同一个 Wi-Fi，手机浏览器打开 `http://<电脑局域网 IP>:5173`（电脑需保持开机，仅局域网内可访问）；
 - 也可以把 `dist/` 部署到任意静态服务器，用手机浏览器访问（游戏仍是纯前端运行）。
 
+### 方式五：Windows 桌面版（.exe 安装包，给没有电脑基础的人）
+
+安装包在项目的 **`release/`** 目录里（当前 `release/Holdem-Setup-0.19.0.exe`，约 **117 MB**）。
+
+**安装步骤（三步，不需要任何电脑知识）**
+
+1. 双击 `Holdem-Setup-0.19.0.exe`；
+2. 安装自动完成——不弹路径选择、不需要管理员权限、不弹 UAC，装到当前用户目录；
+3. 桌面和开始菜单会出现 **「德州扑克」** 图标，双击即可开玩。
+
+**首次运行会被 Windows 拦一次**：安装包没有代码签名证书，SmartScreen 会提示「Windows 已保护你的电脑」。
+点 **「更多信息」→「仍要运行」** 即可，只需一次。这是所有未签名软件的通病，不是文件有问题。
+
+**它和浏览器版有什么区别**
+
+- 独立窗口，不依赖浏览器、不用记网址、不会误关标签页；
+- 仍然**完全离线**：本地起一个只监听 `127.0.0.1` 的服务提供页面，不访问外网；
+- 设置、牌局历史都存在本机（Electron 的 localStorage），和浏览器版各自独立。
+
+**卸载**：Windows「设置 → 应用 → 德州扑克 → 卸载」，或运行安装目录里的 `Uninstall 德州扑克.exe`。
+
+**自己重新打包（改代码后）**
+
+```bash
+npm i                # 首次需要装 electron / electron-builder（约 250 MB）
+npm run exe          # 生成 release/Holdem-Setup-<版本号>.exe
+npm run exe:portable # 生成免安装的单文件 exe（不写注册表）
+```
+
+构建说明与坑（都已在 `electron-builder.yml` / `electron/main.cjs` 里处理）：
+
+- 页面用**本地 HTTP 服务**提供，而不是 `file://`——Vite 产物是绝对路径（`/assets/...`），`file://` 下会白屏；
+  这样也不用改 `vite.config.ts` 的 `base`（改了会影响安卓包）。
+- `electronDist` 指向 `node_modules/electron/dist`，跳过 electron-builder 的在线下载——
+  它的下载器（`got`）不读 `http_proxy`，在需要代理的网络下会**静默卡死**。
+- `createDesktopShortcut: always`：默认值只在交互式安装时建桌面图标，静默安装（`/S`）会跳过。
+- 冒烟自检（不需要人工看窗口）：`HOLDEM_SMOKE=1 HOLDEM_SMOKE_OUT=<文件> npx electron .`，
+  会依次写入 `BOOT / READY / DIST_OK / SERVER_UP / DID_FINISH_LOAD / SMOKE_OK`。
+  注意 Windows 的 GUI 子系统不把 stdout 接回父进程，所以只能看文件。
+- 体积：Electron 运行时约 240 MB（解包后），NSIS 压缩后安装包 117 MB。这是 Electron 方案的固有成本。
+
 ### 从旧版本升级（之前已经装过旧版本）
 
 **不需要重新跑一遍「一键安装」，也不需要在系统里重新安装 Node.js。** 分两种情况：
