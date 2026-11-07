@@ -23,7 +23,7 @@ import { analyzePostflop } from '../rangeModel';
 import { accumulateStrategy, averageStrategy, regretMatchingPlus } from './cfr';
 import flopBlueprintRaw from '../data/flop-blueprint.json';
 
-export const FLOP_HAND_BUCKETS = 10;
+export const FLOP_HAND_BUCKETS = 16;
 
 /* ------------------------------------------------------------------ */
 /* 1) 翻牌纹理抽象                                                     */
@@ -395,6 +395,8 @@ export function solveFlopBlueprint(input: FlopSolveInput): FlopBlueprint {
 /* ------------------------------------------------------------------ */
 
 interface BlueprintFile {
+  /** 生成时的手牌桶数；与运行时不一致说明数据过期，必须拒绝使用。 */
+  handBuckets?: number;
   textureKeys: string[];
   bucketBoards: string[][];
   nodes: Record<string, FlopActionName[]>;
@@ -416,6 +418,12 @@ function loadBlueprint(): typeof loaded {
   try {
     // 静态导入：打包时内联，浏览器端没有 require
     const raw = flopBlueprintRaw as unknown as BlueprintFile;
+    // 手牌桶数变了而数据没重生成 → 桶下标含义完全不同，必须拒绝使用，
+    // 否则会拿「第 3 桶」的策略去套「另一个第 3 桶」的手牌，比不用还糟。
+    if (raw.handBuckets !== FLOP_HAND_BUCKETS) {
+      loaded = null;
+      return null;
+    }
     const keyToBucket = new Map<string, number>();
     const coarseToBucket = new Map<string, number>();
     const roughestToBucket = new Map<string, number>();
@@ -479,6 +487,28 @@ export interface FlopAdvice {
   handBucket: number;
   actions: FlopActionName[];
   strategy: number[];
+}
+
+/**
+ * 蓝图只对一个特定底池求解：**SB 开池 2.5~3.5BB、BB 跟注、无第三人**的单加注底池。
+ *
+ * 旧实现完全没校验这一点：只要翻牌纹理命中就套用，于是跛入池、3-bet 池、
+ * 甚至翻前打光的边池都会被喂进「单加注底池的均衡策略」。这是 v0.23 里
+ * 翻牌蓝图 −19 BB/100 的首要嫌疑——不是策略错，是**用错了地方**。
+ *
+ * 返回 false 时调用方必须回退启发式。
+ */
+export function flopSpotMatches(
+  preflopActions: readonly { action: { type: string; amount?: number } }[],
+  bigBlind: number,
+): boolean {
+  if (preflopActions.length !== 2) return false;
+  const [first, second] = preflopActions;
+  const isRaise = first.action.type === 'raise';
+  if (!isRaise) return false; // 跛入 / 全下开池都不在蓝图覆盖内
+  if (second.action.type !== 'call') return false; // BB 必须跟注（弃牌则没翻牌）
+  const openTo = (first.action.amount ?? 0) / Math.max(1, bigBlind);
+  return openTo >= 2.2 && openTo <= 4;
 }
 
 /**

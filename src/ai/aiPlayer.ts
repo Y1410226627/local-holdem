@@ -16,7 +16,7 @@
 import type { Card, Difficulty, LegalActions, PlayerAction } from '../game/types';
 import { equityVsTopRange, estimateRaiserRange } from './preflopCall';
 import { evaluatePreflop } from './preflopEv';
-import { flopAdvice } from './solver/flopBlueprint';
+import { flopAdvice, flopSpotMatches } from './solver/flopBlueprint';
 import type { PlayerView } from '../game/playerView';
 import { derivedRng } from '../game/cards';
 import {
@@ -1742,7 +1742,12 @@ async function decideCore(
         view.street === 'flop' &&
         activeOpponents === 1 &&
         options.flopBlueprint === true &&
-        !solvedByCfr
+        !solvedByCfr &&
+        // 只对「SB 开池 / BB 跟注」的单加注底池使用——蓝图没解过别的底池形状
+        flopSpotMatches(
+          view.actions.filter((record) => record.street === 'preflop'),
+          view.bigBlind,
+        )
       ) {
         const streetActions = view.actions.filter((record) => record.street === 'flop');
         const advice = flopAdvice(view.board, view.self.holeCards, streetActions);

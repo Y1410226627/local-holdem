@@ -5,6 +5,9 @@ import { solveTurnRiver } from '../ai/solver/subgameTurn';
 import { buildStreetRanges, preflopRangeFor, rangeFromWeight } from '../ai/solver/ranges';
 import { preflopAdvice, solvePreflopBlueprint } from '../ai/solver/preflop';
 import { PREFLOP_BUCKETS, preflopBucketTable } from '../ai/solver/abstraction';
+import { flopSpotMatches } from '../ai/solver/flopBlueprint';
+import { turnValueFeaturesOf, TURN_VALUE_FEATURES } from '../ai/solver/turnValue';
+import type { Card } from '../game/types';
 import { buildPlayerView } from '../game/playerView';
 import { decide } from '../ai/aiPlayer';
 import { CC, makeHand, playSequence, playToStreet } from './helpers';
@@ -423,5 +426,72 @@ describe('范围转换（求解器与启发式共用同一套范围）', () => {
     const range = rangeFromWeight(view, (first) => (first.rank === 14 ? 1 : 0), 1);
     expect(range.size).toBeGreaterThan(0);
     for (const key of range.keys()) expect(key.includes('14')).toBe(true);
+  });
+});
+
+describe('翻牌蓝图的适用范围（v0.24.0 修复）', () => {
+  const BB = 20;
+  const raise = (toBB: number) => ({ action: { type: 'raise', amount: toBB * BB } });
+  const call = { action: { type: 'call' } };
+  const limp = { action: { type: 'call' } };
+  const check = { action: { type: 'check' } };
+  const fold = { action: { type: 'fold' } };
+
+  it('单加注底池（开注 2.5~3.5BB + 跟注）才算命中', () => {
+    expect(flopSpotMatches([raise(3), call], BB)).toBe(true);
+    expect(flopSpotMatches([raise(2.5), call], BB)).toBe(true);
+  });
+
+  it('跛入池 / 弃牌 / 3-bet 池 / 超大开注都不命中', () => {
+    // 旧实现只要翻牌纹理命中就套用蓝图，这些底池形状它根本没解过
+    expect(flopSpotMatches([limp, check], BB)).toBe(false);
+    expect(flopSpotMatches([raise(3), fold], BB)).toBe(false);
+    expect(flopSpotMatches([raise(3), raise(9), call], BB)).toBe(false);
+    expect(flopSpotMatches([raise(12), call], BB)).toBe(false);
+    expect(flopSpotMatches([], BB)).toBe(false);
+  });
+});
+
+describe('转牌价值网络：特征必须能区分成牌类别（v0.24.0 扩容）', () => {
+  it('特征维度为 24，且成牌类别 one-hot 只亮一个', () => {
+    const board = CC('9s 2h Kd 7c') as [Card, Card, Card, Card];
+    const cases: Array<[string, number]> = [
+      ['Ac Ah', 1], // 一对（超对）
+      ['9h 9d', 3], // 三条
+      ['Kh Kc', 3], // 三条
+      ['Tc Jc', 0], // 高牌 + 听牌
+    ];
+    for (const [hole, category] of cases) {
+      const features = turnValueFeaturesOf({
+        hole: CC(hole) as [Card, Card],
+        board,
+        pot: 200,
+        callAmount: 0,
+        stack: 900,
+        canCheck: true,
+      });
+      expect(features.length).toBe(TURN_VALUE_FEATURES);
+      // 索引 14..19 是类别 one-hot
+      const hot = features.slice(14, 20).reduce((a, b) => a + b, 0);
+      expect(hot).toBeCloseTo(1, 6);
+      if (category <= 4) {
+        expect(features[14 + category]).toBe(1);
+      } else {
+        expect(features[19]).toBe(1);
+      }
+    }
+  });
+
+  it('同样的牌，面对下注时「面对下注」位为 1', () => {
+    const base = {
+      hole: CC('Ac Ah') as [Card, Card],
+      board: CC('9s 2h Kd 7c') as [Card, Card, Card, Card],
+      pot: 200,
+      stack: 900,
+    };
+    const free = turnValueFeaturesOf({ ...base, callAmount: 0, canCheck: true });
+    const facing = turnValueFeaturesOf({ ...base, callAmount: 100, canCheck: false });
+    expect(free[13]).toBe(0);
+    expect(facing[13]).toBe(1);
   });
 });
