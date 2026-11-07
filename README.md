@@ -155,6 +155,38 @@ npm run exe:portable # 生成免安装的单文件 exe（不写注册表）
   注意 Windows 的 GUI 子系统不把 stdout 接回父进程，所以只能看文件。
 - 体积：Electron 运行时约 240 MB（解包后），NSIS 压缩后安装包 117 MB。这是 Electron 方案的固有成本。
 
+### 方式六：Mac / Linux / 任意系统（单文件 HTML，双击即玩）
+
+`.exe` **只能在 Windows 上跑**（里面是 win32 的 Electron 运行时 + NSIS 安装器，macOS 不认）。
+macOS 的 `.app` 又必须在 Mac 上打包（electron-builder 会直接拒绝：`Build for macOS is supported only on macOS`）。
+所以跨系统的形态是**一个 HTML 文件**：
+
+```bash
+npm run single     # → release/德州扑克.html（约 590 KB）
+```
+
+把 `release/德州扑克.html` 发给对方，**双击就能用默认浏览器打开玩**：
+
+- 不需要安装 Node、不需要联网、不需要任何运行时；
+- Windows / macOS / Linux 通用，Chrome / Edge / Safari / Firefox 都行；
+- 所有 JS、CSS、图标都内联在这一个文件里，没有任何外部依赖；
+- 设置和牌局历史存在浏览器的 localStorage 里（和浏览器版共享同一个来源，但和 exe 版各自独立）。
+
+**已知差异（都验证过）**
+
+| 项目 | 单文件 HTML | exe 桌面版 |
+| --- | --- | --- |
+| 依赖 | 无，双击即可 | 无（Electron 运行时已打包） |
+| 存储 | 取决于浏览器对本地文件的策略；Safari 可能不保存设置 | 稳定保存 |
+| 窗口 | 浏览器标签页 | 独立应用窗口 |
+| 体积 | 590 KB | 117 MB |
+
+`file://` 下的行为是实测过的，不是推断：用 Chromium 加载构建产物，页面文本长度 1687 字符、
+与 HTTP 版**完全一致**，`localStorage` 可写。自检脚本：`npx electron scripts/smoke-single.cjs <html> <输出文件>`。
+
+> 为什么不用 `file://` 直接开 `dist/index.html`：Vite 产物是绝对路径（`/assets/...`），
+> `file://` 下会解析到磁盘根目录，直接白屏。单文件版靠「全部内联 + 相对路径」绕开这个问题。
+
 ### 从旧版本升级（之前已经装过旧版本）
 
 **不需要重新跑一遍「一键安装」，也不需要在系统里重新安装 Node.js。** 分两种情况：

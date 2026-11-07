@@ -80,6 +80,7 @@ node scripts/setup.mjs --check          # 只检查环境（启动器内部使�
 | 训练冒烟 | `npm run train -- --rounds=1 --seed=agent-smoke` | 约 2–4 秒，退出码 0 |
 | 打包 APK（可选） | `npm run apk` | 输出 `APK_RESULT=OK`，生成 `apk/德州扑克-v<version>.apk`（首次约 2–5 分钟） |
 | 打包 Windows 桌面版（可选） | `npm run exe` | 生成 `release/Holdem-Setup-<version>.exe`（约 117 MB）；`release/` 已 gitignore |
+| 打包单文件 HTML（跨平台） | `npm run single` | 生成 `release/德州扑克.html`（约 590 KB，零外部依赖，双击即玩）；自检 `npx electron scripts/smoke-single.cjs <html> <out>` 必须输出 `SINGLE_OK` |
 
 ## 启动与冒烟检查
 
@@ -111,7 +112,12 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
     ③`createDesktopShortcut` 必须是 `always`，否则静默安装不建桌面图标。
     改动后跑冒烟：`HOLDEM_SMOKE=1 HOLDEM_SMOKE_OUT=<文件> npx electron .`，必须输出 `SMOKE_OK`。
 
-12. **安卓 APK（每次版本更新必做）**：每个版本都要重新执行 `npm run apk` 并更新 `apk/` 目录（只保留当前版本文件），APK 的 versionName 由 `package.json` 自动生成；不要提交签名密钥（默认在 `C:\AndroidToolchain\keystore\`，已在 `android/.gitignore` 忽略）。
+12. **单文件 HTML（跨平台兜底）**：`vite.config.single.ts` + `scripts/build-single.mjs`。
+    它把 JS/CSS 全部内联，并删掉 `manifest` / `apple-touch-icon` 两个外部 `<link>`，
+    保证 `file://` 下零请求。**约束**：不要给它加任何需要网络请求的资源（字体、CDN、图片外链），
+    否则双击打开就会挂。改动后必须跑 `scripts/smoke-single.cjs` 验证 `SINGLE_OK`。
+
+13. **安卓 APK（每次版本更新必做）**：每个版本都要重新执行 `npm run apk` 并更新 `apk/` 目录（只保留当前版本文件），APK 的 versionName 由 `package.json` 自动生成；不要提交签名密钥（默认在 `C:\AndroidToolchain\keystore\`，已在 `android/.gitignore` 忽略）。
 
 ## 目录速览
 

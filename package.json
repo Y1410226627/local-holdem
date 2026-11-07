@@ -21,7 +21,8 @@
     "gto:blueprint": "tsx scripts/generate-preflop-blueprint.ts",
     "audit:exploit": "tsx scripts/audit-exploit.ts",
     "exe": "npm run build && electron-builder --win nsis",
-    "exe:portable": "npm run build && electron-builder --win portable"
+    "exe:portable": "npm run build && electron-builder --win portable",
+    "single": "node scripts/build-single.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^7.6.10",
@@ -39,6 +40,7 @@
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vite": "^8.3.5",
+    "vite-plugin-singlefile": "^2.3.4",
     "vitest": "^5.1.0"
   },
   "main": "electron/main.cjs",

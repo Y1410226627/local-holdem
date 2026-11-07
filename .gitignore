@@ -29,3 +29,6 @@ references/
 
 # Electron 打包产物（安装包体积大，不进仓库）
 release/
+
+# 单文件 HTML 构建产物
+dist-single/
