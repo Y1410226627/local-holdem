@@ -45,6 +45,12 @@ export interface TurnRiverResult {
   iterations: number;
   combos: number;
   riverBuckets: number;
+  /** 平均策略下根节点的期望收益（英雄视角，单位筹码）。价值网络的训练标签。 */
+  rootValue: number;
+  /** 「从现在往后还值多少」= rootValue + 自己本手已投入。价值函数的训练标签。 */
+  rootValueFromNow: number;
+  /** 同上，换算成大盲。 */
+  rootValueBB: number;
   elapsedMs: number;
 }
 
@@ -368,6 +374,21 @@ function buildTurnTree(
 /* 向量化 CFR+                                                         */
 /* ------------------------------------------------------------------ */
 
+/** 平均策略矩阵：把 `sum` 按行归一化（评估用，不做遗憾匹配）。 */
+function averageMatrix(sum: Float64Array, rows: number, actions: number): Float64Array {
+  const out = new Float64Array(rows * actions);
+  for (let row = 0; row < rows; row++) {
+    const base = row * actions;
+    let total = 0;
+    for (let action = 0; action < actions; action++) total += Math.max(0, sum[base + action]);
+    for (let action = 0; action < actions; action++) {
+      out[base + action] =
+        total <= 1e-12 ? 1 / actions : Math.max(0, sum[base + action]) / total;
+    }
+  }
+  return out;
+}
+
 function strategyMatrix(regret: Float64Array, rows: number, actions: number): Float64Array {
   const out = new Float64Array(rows * actions);
   for (let row = 0; row < rows; row++) {
@@ -566,6 +587,7 @@ export function solveTurnRiver(
     outVillain: Float64Array,
     weight: number,
     signs: Float64Array,
+    evaluateOnly = false,
   ): void => {
     if (node.kind === 'heroFold') {
       outHero.fill(-node.invested * sumOf(villainReach));
@@ -607,7 +629,7 @@ export function solveTurnRiver(
       const tmpHero = new Float64Array(nH);
       const tmpVillain = new Float64Array(nV);
       for (const branch of node.branches) {
-        traverse(branch.next, heroReach, villainReach, tmpHero, tmpVillain, weight, branch.signs);
+        traverse(branch.next, heroReach, villainReach, tmpHero, tmpVillain, weight, branch.signs, evaluateOnly);
         for (let h = 0; h < nH; h++) outHero[h] += branch.weight * tmpHero[h];
         for (let v = 0; v < nV; v++) outVillain[v] += branch.weight * tmpVillain[v];
       }
@@ -619,7 +641,9 @@ export function solveTurnRiver(
     ensureInfo(node, rows);
     const regret = node.regret!;
     const sum = node.sum!;
-    const strategy = strategyMatrix(regret, rows, actionCount);
+    const strategy = evaluateOnly
+      ? averageMatrix(sum, rows, actionCount)
+      : strategyMatrix(regret, rows, actionCount);
     const ownReach = node.kind === 'hero' ? heroReach : villainReach;
     const childHero: Float64Array[] = [];
     const childVillain: Float64Array[] = [];
@@ -629,9 +653,9 @@ export function solveTurnRiver(
       const cv = new Float64Array(nV);
       for (let index = 0; index < rows; index++) scaled[index] = ownReach[index] * strategy[index * actionCount + action];
       if (node.kind === 'hero') {
-        traverse(node.actions[action].next, scaled, villainReach, ch, cv, weight, signs);
+        traverse(node.actions[action].next, scaled, villainReach, ch, cv, weight, signs, evaluateOnly);
       } else {
-        traverse(node.actions[action].next, heroReach, scaled, ch, cv, weight, signs);
+        traverse(node.actions[action].next, heroReach, scaled, ch, cv, weight, signs, evaluateOnly);
       }
       childHero.push(ch);
       childVillain.push(cv);
@@ -653,6 +677,7 @@ export function solveTurnRiver(
       for (let action = 0; action < actionCount; action++) total += childOpp[action][index];
       outOpp[index] = total;
     }
+    if (evaluateOnly) return;
     for (let index = 0; index < rows; index++) {
       const base = index * actionCount;
       const nodeValue = outOwn[index];
@@ -670,6 +695,19 @@ export function solveTurnRiver(
     }
   };
 
+  /**
+   * 策略评估：用**平均策略**再遍历一次，求根节点的期望收益（英雄视角，单位筹码）。
+   *
+   * 这是 B 路线（价值网络）的标签来源——没有它就不知道「这个转牌局面对我方值多少」。
+   */
+  const evaluateRootValue = (): number => {
+    const heroOut = new Float64Array(nH);
+    const villainOut = new Float64Array(nV);
+    traverse(tree, heroRootReach, villainRootReach, heroOut, villainOut, 0, branches[0].signs, true);
+    let ev = 0;
+    for (let h = 0; h < nH; h++) ev += heroRootReach[h] * heroOut[h];
+    return ev;
+  };
   const iterations = Math.max(1, Math.floor(options.iterations ?? 200));
   const budget = options.timeBudgetMs ?? 0;
   const outHero = new Float64Array(nH);
@@ -694,6 +732,9 @@ export function solveTurnRiver(
     completed = iteration;
     if (budget > 0 && iteration >= 40 && Date.now() - startedAt > budget) break;
   }
+
+  // 必须在 CFR 迭代**之后**评估：之前 sum 还是空的，等于用均匀随机策略算价值
+  const rootValue = evaluateRootValue();
 
   const actionCount = (tree as HeroNode).actions.length;
   let strategy: number[];
@@ -733,6 +774,11 @@ export function solveTurnRiver(
     iterations: completed,
     combos: nH,
     riverBuckets: branches.length,
+    rootValue,
+    // 终局记的是「从当前节点往后的投入」，所以 rootValue 本身就是「从现在起还值多少」。
+    // （实测：空气牌弃牌 ≈ 0，暗三条面对下注 ≈ +43 筹码）
+    rootValueFromNow: rootValue,
+    rootValueBB: rootValue / Math.max(1, view.bigBlind),
     elapsedMs: Date.now() - startedAt,
   };
 }
