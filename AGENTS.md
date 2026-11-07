@@ -17,6 +17,12 @@
 - **真人化决策**：`src/ai/humanModel.ts` 提供跨手公开统计（VPIP / PFR / 攻击性 / 面对下注弃牌率）、情绪、按难度分级的对手利用与真人式失误、fold-equity 近似 EV 尺度；`stateMachine.ts` 在每手结束累计 `statsRaw` 与 `mood`，`aiPlayer.ts` 接入四档决策，座位 HUD 显示跨手画像，LLM 提示词带 `READS` 画像。这些状态只能由公开动作推导，不得读取隐藏信息；改动需更新 `humanModel.test.ts`。
 - **挑战宗师模式（静态分流，不再逐手回退）**：`options.challenge` 下按人数选引擎——单挑翻前用离线 CFR+ 蓝图（只接 BB 防守）+ SB 放宽；单挑河牌 `solveStreetSubgame()`（双边范围、全树遍历全部 combo 同时更新的 vanilla CFR+，含加注）**默认关闭**（`ENABLE_RIVER_SOLVER=true`；配对消融 −4.9~−10.1，CI 含 0）；3 人用旧范围 + 多人谨慎 + 挑战启发式；4–6 人用专家启发式 + 多人谨慎。**禁止**再把挑战动作改回 `expertDecision.action`；`pickChallengeDecision` 已删除。改动需更新 `challenge.test.ts`、`solver.test.ts`、`families.test.ts`。
 - **CFR+ / 翻前蓝图 / 河牌 MCCFR / 按街范围**：`src/ai/solver/` 是新的算法层。`cfr.ts` 提供遗憾匹配+、线性平均、矩阵博弈求解；`abstraction.ts` 按**真实胜率**分 10 个桶（不再用 Chen 分数）并提供牌面纹理 / 组合；`preflop.ts` 在 HU 抽象树上跑 CFR+ 并查 `data/preflop-blueprint.json`（24 桶、SB+BB 双边已接入运行时，SB 树禁用跛入）；`buildBlueprintRangeWeights()` 用蓝图动作频率推出翻后范围（策略一致先验）；`subgameTurn.ts` 做**转+河联合求解**（河牌按牌面分 3 桶、桶内矩阵平均；终点是摊牌，无需价值函数），默认启用；`subgame.ts` 对 HU 河牌做**双边范围 vanilla CFR+**（全树遍历、全部 combo 同时更新；check/bet 33/50/100，fold/call/raise；平均策略跳过前 50% 迭代、前 30 轮按 √T/(√T+1) 折减遗憾），默认关闭；`ranges.ts` 做按街贝叶斯范围更新（已实现，但启发式仍用旧 `buildChallengeRanges`，因为新似然参数下基准更差）；`blueprint.ts` 负责加载。离线生成：`npm run gto:equity` / `npm run gto:blueprint`。**约束**：求解器只接收 `PlayerView` + 自己底牌；不得把 `HandState` / `deck` / `burned` / 对手底牌传进去。改动需更新 `solver.test.ts`。
+- **翻前跟注必须看底池赔率（v0.20.0 起）**：`src/ai/preflopCall.ts` 提供「对加注范围胜率 vs 底池赔率」的判定，
+  在 `decidePreflop` 里当 `commitFraction >= 0.25` 时接管决策。**禁止**把翻前跟注改回「只看百分位阈值」——
+  那会让「面对加注到 40」和「面对 126BB 全下」用同一个跟注范围（真实对局里因此亏掉 5040 的底池）。
+  另：`preflopStrength` 必须按**真实胜率**排序（`data/preflop-equity.json`），不能用 Chen 公式——
+  Chen 会把 J9o 排在 Q9o 前面，违反压制关系。改动需更新 `preflopCall.test.ts`。
+
 - **剥削层（`src/ai/exploit.ts`）**：把公开统计转成三个决策阈值的调整量——价值线、诈唬率、跟注线。**禁止**再在 `aiPlayer.ts` 里写死这些阈值。设计约束：
   - 以 GTO 基准为原点：诈唬率按 α(bet) = bet/(pot+2bet) 随尺度缩放；跟注线从底池赔率出发；对「从不弃牌」的对手价值线压到 0.5（下注的盈亏平衡点）。
   - 采纳权重 `w = confidence × closeness`：样本不足（`confidence < 0.25`）完全退回基准；低难度（closeness 低）几乎不调整。
@@ -126,12 +132,13 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 | `src/game/` | 纯函数规则引擎（牌堆、牌型、下注、边池、状态机、受限视图、日志） |
 | `src/ai/` | 四档难度、范围模型、蒙特卡洛胜率、大模型机器人、训练参数；`data/` 为训练产物 |
 | `src/ui/` | React 界面（教程、大厅、牌桌、设置栏、调试面板、历史回放）；`mobile.ts` 为手机布局判定与安卓壳检测 |
-| `src/tests/` | Vitest 测试（31 个文件 / 411 个用例） |
+| `src/tests/` | Vitest 测试（32 个文件 / 422 个用例） |
 | `src/ai/style.ts` | 体验随机：机器人风格原型 / 下注尺度偏好 / 本地台词 / 变化率 |
 | `src/ai/humanModel.ts` | 真人化：跨手统计 / 情绪 / 对手利用 / 真人式失误 / fold-equity EV |
 | `src/ai/challenge.ts` | 挑战宗师：宗师原型 / 读计时与下注细节 / 计时伪装 / range 极化 / EV 尺度 |
 | `src/ai/solver/` | 真 CFR+：`cfr.ts` 原语 / `preflop.ts` 翻前蓝图 / `subgame.ts` 河牌子博弈 / `subgameTurn.ts` 转+河联合 / `ranges.ts` 按街范围 / `abstraction.ts` 真实胜率桶 |
 | `src/ai/exploit.ts` | 剥削层：公开统计 → 价值线 / 诈唬率 / 跟注线；强读时跳过均衡求解 |
+| `src/ai/preflopCall.ts` | 翻前数学判定：对手范围估计 + 对范围胜率 + 底池赔率 |
 | `src/ai/gto.ts` | GTO 频率公式 / 短码 push-fold / EV 尺度混合（保留为启发式层） |
 | `src/ai/gtoTable.ts` | B1：离线 push/fold 策略表加载 + 筹码深度插值 |
 | `src/ai/gtoAdvice.ts` | B1：短码单挑建议（查表优先，表外回退在线求解） |
@@ -153,7 +160,7 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 ## 验收清单（DoD）
 
 - [ ] `node scripts/setup.mjs --agent` 退出码 0，输出 `SETUP_RESULT=OK`
-- [ ] `npm test`：31 个测试文件、411 个用例全部通过
+- [ ] `npm test`：32 个测试文件、422 个用例全部通过
 - [ ] `npm run build`：生成 `dist/`，无 TypeScript 错误
 - [ ] `npm run dev -- --host 127.0.0.1 --port 5173 --strictPort` 可启动，HTTP 探测 200
 - [ ] 启动脚本冒烟（按平台）：Windows `启动德州扑克.bat --no-open` / macOS-Linux `bash 启动德州扑克.sh --no-open` 能起服务并返回 200

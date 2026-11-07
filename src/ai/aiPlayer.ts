@@ -13,7 +13,8 @@
  *   derivedRng(view.seed, difficulty, actions.length, styleId)
  * 绝不使用 Math.random。
  */
-import type { Difficulty, LegalActions, PlayerAction } from '../game/types';
+import type { Card, Difficulty, LegalActions, PlayerAction } from '../game/types';
+import { equityVsTopRange, estimateRaiserRange } from './preflopCall';
 import type { PlayerView } from '../game/playerView';
 import { derivedRng } from '../game/cards';
 import {
@@ -422,6 +423,16 @@ interface PreflopResult {
   reasoning: string;
 }
 
+function reasonTagOf(ctx: DecisionContext, difficulty: Difficulty): string {
+  return ctx.challenge
+    ? '挑战宗师：位置 / 范围 / 读人后决策'
+    : difficulty === 'expert'
+      ? '专家风格：位置与对手行动倾向加权'
+      : difficulty === 'hard'
+        ? '困难风格：位置范围表 + 混合频率'
+        : '普通风格：位置范围表';
+}
+
 function decidePreflop(
   ctx: DecisionContext,
   strength: number,
@@ -542,6 +553,38 @@ function decidePreflop(
     strength >= thresholds.threeBet && rng() < profile.preflop.trapRate;
   const wantRaise = (strength >= thresholds.raise || mixRaise || bluffRaise) && !trap;
 
+  // ── 面对大幅加注：用「对加注范围的胜率 vs 底池赔率」判定，而不是查百分位表 ──
+  //
+  // 旧实现只有 `strength >= thresholds.play` 一个条件，跟注额完全不参与决策：
+  // 面对「加注到 40」和「全下 2520」用的是同一个跟注范围。
+  // 实测后果：6 人桌有人 126BB 全下，机器人拿 J9o（对全下范围约 30%）跟了 2430。
+  if (facingRaise && legal.canCall) {
+    const commitFraction =
+      legal.callAmount / Math.max(1, view.self.stack + view.self.totalCommitted);
+    if (commitFraction >= 0.25) {
+      const hero = view.self.holeCards as [Card, Card];
+      const rangePercentile = estimateRaiserRange({
+        commitFraction,
+        avgPfr: ctx.opponents.avgPfr,
+        raiseCount,
+      });
+      const equity = equityVsTopRange(hero, rangePercentile, rng, 200);
+      const callOk = equity >= ctx.potOdds + 0.005;
+      const action: PlayerAction = callOk
+        ? { type: 'call' }
+        : legal.canFold
+          ? { type: 'fold' }
+          : { type: 'call' };
+      const reasoning =
+        `${reasonTagOf(ctx, difficulty)}：翻前数学判定——起手牌 ${key}，` +
+        `要跟 ${legal.callAmount}（占自己筹码 ${(commitFraction * 100).toFixed(0)}%），` +
+        `估计对手范围前 ${(rangePercentile * 100).toFixed(0)}%，` +
+        `我方对该范围胜率 ${(equity * 100).toFixed(1)}%，底池赔率需要 ${(ctx.potOdds * 100).toFixed(1)}% → ` +
+        `${callOk ? '跟注' : '弃牌'}。`;
+      return { action, reasoning };
+    }
+  }
+
   const target = facingRaise
     ? threeBetTarget(ctx, profile)
     : openRaiseTarget(ctx, profile);
@@ -572,13 +615,7 @@ function decidePreflop(
         : action.type === 'check'
           ? '过牌'
           : '弃牌';
-  const reasonTag = ctx.challenge
-    ? '挑战宗师：位置 / 范围 / 读人后决策'
-    : difficulty === 'expert'
-      ? '专家风格：位置与对手行动倾向加权'
-      : difficulty === 'hard'
-        ? '困难风格：位置范围表 + 混合频率'
-        : '普通风格：位置范围表';
+  const reasonTag = reasonTagOf(ctx, difficulty);
 
   const reasoning =
     `${reasonTag}：${positionText}起手牌 ${key} 强度 ${strength.toFixed(2)}；` +

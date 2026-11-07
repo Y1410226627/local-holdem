@@ -7,6 +7,7 @@
  * - 位置：由 view.buttonIndex 与玩家座位推导 early / middle / late / blinds。
  * - 翻牌后：evaluate() 的牌型 + 听牌 + 公共牌纹理 → 0..1 的粗略强度。
  */
+import equityRaw from './data/preflop-equity.json';
 import type { Card, Rank } from '../game/types';
 import type { PlayerView } from '../game/playerView';
 import type { Difficulty } from '../game/types';
@@ -127,13 +128,32 @@ function getHandClassTable(): Map<string, HandClassInfo> {
       });
     }
   }
-  list.sort(
-    (a, b) =>
+  /**
+   * 按**真实胜率**排序，而不是 Chen 公式。
+   *
+   * 旧实现按 Chen 排序，再把累计组合占比当作「强度百分位」。Chen 是可玩性启发式，
+   * 会给连张加分，于是出现 J9o(6) 排在 Q9o(5) 前面——但 Q9o 在数学上完全压制 J9o。
+   * 实测后果：机器人认为 J9o 是前 21% 的强牌（0.787），拿它跟了 126BB 全下。
+   *
+   * 真实胜率表（对随机手牌蒙特卡洛，见 scripts/generate-preflop-equity.ts）本来就有，
+   * 之前只给求解器用，翻前决策没接。现在两边统一。
+   */
+  const equityByKey = (equityRaw as unknown as {
+    entries: Record<string, { equity: number }>;
+  }).entries;
+  list.sort((a, b) => {
+    const equityA = equityByKey[a.key]?.equity;
+    const equityB = equityByKey[b.key]?.equity;
+    if (equityA !== undefined && equityB !== undefined && equityA !== equityB) {
+      return equityA - equityB;
+    }
+    return (
       a.chen - b.chen ||
       a.high - b.high ||
       a.low - b.low ||
-      Number(a.suited) - Number(b.suited),
-  );
+      Number(a.suited) - Number(b.suited)
+    );
+  });
   const table = new Map<string, HandClassInfo>();
   let cumulative = 0;
   for (const info of list) {
