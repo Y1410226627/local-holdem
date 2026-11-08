@@ -5,7 +5,7 @@ import { decide } from '../src/ai/aiPlayer';
 import type { Difficulty, PlayerAction, TableState } from '../src/game/types';
 
 const HANDS = Number(process.env.HANDS ?? 300);
-const KIND = (process.env.KIND ?? 'caller') as 'caller' | 'folder' | 'shover';
+const KIND = (process.env.KIND ?? 'caller') as 'caller' | 'folder' | 'shover' | 'expert';
 const CHALLENGE = process.env.CHALLENGE === '1';
 const DIFF = (process.env.DIFF ?? 'expert') as Difficulty;
 const FLOP_BP = process.env.FLOP_BP === '1';
@@ -50,6 +50,9 @@ for (let h = 0; h < HANDS; h++) {
       const e = d.debug.engine ?? 'heuristic';
       engines[e] = (engines[e] ?? 0) + 1;
       if (view.street === 'flop') flopDecisions[e] = (flopDecisions[e] ?? 0) + 1;
+    } else if (KIND === 'expert') {
+      // 用专家档当对手，才能看到「挑战 vs 专家」里求解器到底跑没跑
+      action = (await decide(view, 'expert', { challenge: false })).action;
     } else {
       action = fixed(legal);
     }

@@ -18,6 +18,14 @@ const CHALLENGE = process.env.CHALLENGE === '1';
 const SEAT = Number(process.env.SEAT ?? 0);
 /** 消融开关：FLOP_BP=1 打开翻牌蓝图；TURN_NET=1 打开转牌价值网络叶子。 */
 const FLOP_BP = process.env.FLOP_BP === '1';
+/**
+ * 蒙特卡洛上限（0 = 不设上限，用各档位自己的 profile 值）。
+ *
+ * 必须默认 0：`resolveIterations` 取 `min(profile.mcIterations, maxIterations)`。
+ * 挑战档 mcIterations=30000、专家档 20000；传 800 会把挑战档的优势整个抹掉，
+ * 测出来的「挑战 vs 专家」自然只有 0。真实游戏（`useAiDriver`）对本地 AI 不传这个参数。
+ */
+const MAX_ITER = Number(process.env.MAX_ITER ?? 0);
 const STACK = Number(process.env.STACK ?? 1000);
 
 function fixed(kind: Kind, legal: { canCheck: boolean; canCall: boolean; canAllIn: boolean }): PlayerAction {
@@ -59,7 +67,11 @@ async function session(): Promise<number[]> {
       const legal = view.legal!;
       const action =
         idx === SEAT
-          ? (await decide(view, DIFF, { maxIterations: 800, challenge: CHALLENGE, flopBlueprint: FLOP_BP })).action
+          ? (await decide(view, DIFF, {
+              ...(MAX_ITER > 0 ? { maxIterations: MAX_ITER } : {}),
+              challenge: CHALLENGE,
+              flopBlueprint: FLOP_BP,
+            })).action
           : fixed(KIND, legal);
       table = act(table, idx, action);
     }

@@ -25,7 +25,13 @@ import {
   getDifficultyProfile,
   type DifficultyProfile,
 } from './difficulty';
-import { exploitProfile, hasStrongExploitRead, observedPassiveLine, type ExploitProfile } from './exploit';
+import {
+  exploitProfile,
+  hasStrongExploitRead,
+  observedPassiveLine,
+  solverShouldYield,
+  type ExploitProfile,
+} from './exploit';
 import { gtoBoundaryAdjust, gtoClosenessFor, gtoEvSizeChoice } from './gto';
 import { gtoPushFoldAdvice } from './gtoAdvice';
 import { depthLimitedSearch, estimateActionEv } from './search';
@@ -1793,10 +1799,15 @@ async function decideCore(
       const opponentActionsThisHand = view.actions
         .filter((record) => record.actorId !== view.viewerId)
         .map((record) => record.action.type);
+      // 「该不该放弃均衡求解器」和「该不该开剥削层」是两个问题：
+      // 前者只在对手**不弃牌**时成立；后者对过度弃牌 / 高攻击性也成立。
+      // 旧实现把两者混成一个 `hasStrongExploitRead`，导致对正常对手也关掉求解器。
       const strongRead =
         ctx.exploitEnabled &&
-        (hasStrongExploitRead(ctx.opponents) ||
-          observedPassiveLine({ opponentActions: opponentActionsThisHand }));
+        solverShouldYield(
+          ctx.opponents,
+          observedPassiveLine({ opponentActions: opponentActionsThisHand }),
+        );
       // 单挑转牌：转+河联合 CFR+（精确，不依赖价值函数）。
       // 多人底池不套单挑解，继续走挑战启发式 + 多人谨慎。
       if (

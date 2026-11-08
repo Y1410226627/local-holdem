@@ -408,13 +408,16 @@ describe('挑战决策（与引擎集成）', () => {
     return { hand, view };
   }
 
-  it('挑战档位参数比专家更强（MC 次数 / 诈唬 / 尺度更多）', () => {
-    expect(CHALLENGE_PROFILE.postflop.mcIterations).toBeGreaterThan(
-      BASE_DIFFICULTY_PROFILES.expert.postflop.mcIterations,
-    );
-    expect(CHALLENGE_PROFILE.postflop.bluffRate).toBeGreaterThan(
-      BASE_DIFFICULTY_PROFILES.expert.postflop.bluffRate,
-    );
+  it('挑战档 = 专家档 + 更强算力，不是「更激进的另一套参数」', () => {
+    const expert = BASE_DIFFICULTY_PROFILES.expert.postflop;
+    // 唯一允许「更多」的是计算量：蒙特卡洛样本越多，胜率估计越准，只会更好。
+    expect(CHALLENGE_PROFILE.postflop.mcIterations).toBeGreaterThan(expert.mcIterations);
+    // 诈唬率 / 跟注余量必须与专家档一致。
+    // 旧版挑战档是 0.18 / 0.04（比专家档更松），这是拿跟注站调出来的：
+    // 对跟注站诈唬不亏、边缘牌多跟也赚，但对会思考的对手是纯漏洞。
+    // 实测（挑战 vs 专家镜像对打）这两个松参数抵消了求解器带来的全部收益。
+    expect(CHALLENGE_PROFILE.postflop.bluffRate).toBe(expert.bluffRate);
+    expect(CHALLENGE_PROFILE.postflop.callMargin).toBe(expert.callMargin);
     expect(CHALLENGE_PROFILE.style).toContain('挑战');
   });
 

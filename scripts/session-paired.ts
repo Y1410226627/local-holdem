@@ -64,7 +64,7 @@ async function runArm(on: boolean): Promise<number[]> {
       const legal = view.legal!;
       let action: PlayerAction;
       if (idx === SEAT) {
-        const options = { maxIterations: 800, challenge: CHALLENGE, [FLAG]: on } as AIDecisionOptions;
+        const options = { challenge: CHALLENGE, [FLAG]: on } as AIDecisionOptions;
         if (COMBOS_OFF > 0 || COMBOS_ON > 0) {
           options.turnRiver = { maxCombos: on ? COMBOS_ON : COMBOS_OFF };
         }

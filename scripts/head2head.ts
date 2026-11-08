@@ -29,6 +29,20 @@ const NEW_COMBOS = Number(process.env.NEW_COMBOS ?? 0);
 const NEW_ITERS = Number(process.env.NEW_ITERS ?? 0);
 /** 新版是否启用翻牌蓝图。 */
 const NEW_FLOP_BP = process.env.NEW_FLOP_BP === '1';
+/** 逐层消融：把某个挑战档专属层关掉（'0' = 关）。 */
+const NEW_SBWIDE = process.env.NEW_SBWIDE !== '0';
+const NEW_BLUEPRINT = process.env.NEW_BLUEPRINT !== '0';
+const NEW_SOLVER = process.env.NEW_SOLVER !== '0';
+const NEW_EXPLOIT = process.env.NEW_EXPLOIT !== '0';
+const NEW_BP_RANGES = process.env.NEW_BP_RANGES !== '0';
+/**
+ * 蒙特卡洛上限（0 = 不设上限，用各档位自己的 profile 值）。
+ *
+ * 这里必须默认 0：`resolveIterations` 取 `min(profile.mcIterations, maxIterations)`，
+ * 而挑战档的 mcIterations 是 30000、专家档 20000。旧测试台一律传 800，
+ * 等于把挑战档的蒙特卡洛优势整个抹掉——测出来的「挑战 vs 专家」自然只有 0。
+ */
+const MAX_ITER = Number(process.env.MAX_ITER ?? 0);
 
 interface Side {
   challenge: boolean;
@@ -55,7 +69,7 @@ async function play(seed: string, newSeat: number): Promise<number> {
       ? { challenge: NEW_CHALLENGE, decide: decideNew }
       : { challenge: OLD_CHALLENGE, decide: decideOld };
     const options: Parameters<typeof decideNew>[2] = {
-      maxIterations: 800,
+      ...(MAX_ITER > 0 ? { maxIterations: MAX_ITER } : {}),
       challenge: side.challenge,
     };
     if (isNew && (NEW_COMBOS > 0 || NEW_ITERS > 0)) {
@@ -65,6 +79,13 @@ async function play(seed: string, newSeat: number): Promise<number> {
       };
     }
     if (isNew && NEW_FLOP_BP) options.flopBlueprint = true;
+    if (isNew) {
+      options.sbWide = NEW_SBWIDE;
+      options.blueprint = NEW_BLUEPRINT;
+      options.blueprintRanges = NEW_BP_RANGES;
+      options.exploit = NEW_EXPLOIT;
+      if (!NEW_SOLVER) options.turnRiver = { ...(options.turnRiver ?? {}), enabled: false };
+    }
     const decision = await (side.decide as typeof decideNew)(view as never, 'expert', options);
     const action: PlayerAction = decision.action;
     table = act(table, idx, action);
@@ -86,7 +107,8 @@ const varr = nets.reduce((a, b) => a + (b - mean) ** 2, 0) / Math.max(1, n - 1);
 const se = Math.sqrt(varr / n);
 const bb = (v: number) => Number((v / 20 * 100).toFixed(1));
 console.log(JSON.stringify({
-  newTier: NEW_CHALLENGE ? '挑战宗师' : '专家',
+  newTier: (NEW_CHALLENGE ? '挑战宗师' : '专家') +
+    ` [sbWide=${NEW_SBWIDE} bp=${NEW_BLUEPRINT} solver=${NEW_SOLVER} exploit=${NEW_EXPLOIT}]`,
   oldTier: OLD_CHALLENGE ? '挑战宗师' : '专家',
   hands: n,
   bbPer100: bb(mean),
