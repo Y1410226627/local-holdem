@@ -244,8 +244,8 @@ describe('挑战引擎静态分流', () => {
       maxIterations: 80,
       solver: { iterations: 20, maxCombos: 20 },
     });
-    // 河牌 MCCFR 目前默认关闭（ENABLE_RIVER_SOLVER=false）；
-    // 直接求解器测试仍覆盖 MCCFR，这里只验证引擎分流不越界。
+    // 河牌单街求解默认启用（ENABLE_RIVER_SOLVER=true），但专家档单挑河牌只有 20% 概率走求解器，
+    // 所以这里断言「两种引擎都合法」，不锁死具体分支；直接求解器测试仍覆盖 MCCFR 本身。
     expect(['heuristic', 'cfr-subgame']).toContain(decision.debug.engine);
     expect(decision.debug.challenge).toBe(true);
   });

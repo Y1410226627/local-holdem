@@ -15,8 +15,8 @@
 - **玩家名称**：人类名、本地算法机器人名、大模型名均可自定义（`TableConfig.humanName` / `localBotNames` / `llmSeats[].name`）。
 - **体验随机 / 风格**：每个机器人座位在 `createTable` 时由 seed 分配 `styleId`（`src/ai/style.ts` 的 6 种风格），AI 决策时叠加在难度 profile 上（偏移有限）；洗牌与决策使用 `xoshiro128**` + 用途派生随机流；本地机器人台词与思考时间抖动也在 `style.ts` / `useAiDriver.ts`。修改相关代码需更新 `style.test.ts` / `randomness.test.ts`，并保持同 seed 可复现。
 - **真人化决策**：`src/ai/humanModel.ts` 提供跨手公开统计（VPIP / PFR / 攻击性 / 面对下注弃牌率）、情绪、按难度分级的对手利用与真人式失误、fold-equity 近似 EV 尺度；`stateMachine.ts` 在每手结束累计 `statsRaw` 与 `mood`，`aiPlayer.ts` 接入四档决策，座位 HUD 显示跨手画像，LLM 提示词带 `READS` 画像。这些状态只能由公开动作推导，不得读取隐藏信息；改动需更新 `humanModel.test.ts`。
-- **挑战宗师模式（静态分流，不再逐手回退）**：`options.challenge` 下按人数选引擎——单挑翻前用离线 CFR+ 蓝图（只接 BB 防守）+ SB 放宽；单挑河牌 `solveStreetSubgame()`（双边范围、全树遍历全部 combo 同时更新的 vanilla CFR+，含加注）**默认关闭**（`ENABLE_RIVER_SOLVER=true`；配对消融 −4.9~−10.1，CI 含 0）；3 人用旧范围 + 多人谨慎 + 挑战启发式；4–6 人用专家启发式 + 多人谨慎。**禁止**再把挑战动作改回 `expertDecision.action`；`pickChallengeDecision` 已删除。改动需更新 `challenge.test.ts`、`solver.test.ts`、`families.test.ts`。
-- **CFR+ / 翻前蓝图 / 河牌 MCCFR / 按街范围**：`src/ai/solver/` 是新的算法层。`cfr.ts` 提供遗憾匹配+、线性平均、矩阵博弈求解；`abstraction.ts` 按**真实胜率**分 10 个桶（不再用 Chen 分数）并提供牌面纹理 / 组合；`preflop.ts` 在 HU 抽象树上跑 CFR+ 并查 `data/preflop-blueprint.json`（24 桶、SB+BB 双边已接入运行时，SB 树禁用跛入）；`buildBlueprintRangeWeights()` 用蓝图动作频率推出翻后范围（策略一致先验）；`subgameTurn.ts` 做**转+河联合求解**（河牌按牌面分 3 桶、桶内矩阵平均；终点是摊牌，无需价值函数），默认启用；`subgame.ts` 对 HU 河牌做**双边范围 vanilla CFR+**（全树遍历、全部 combo 同时更新；check/bet 33/50/100，fold/call/raise；平均策略跳过前 50% 迭代、前 30 轮按 √T/(√T+1) 折减遗憾），默认关闭；`ranges.ts` 做按街贝叶斯范围更新（已实现，但启发式仍用旧 `buildChallengeRanges`，因为新似然参数下基准更差）；`blueprint.ts` 负责加载。离线生成：`npm run gto:equity` / `npm run gto:blueprint`。**约束**：求解器只接收 `PlayerView` + 自己底牌；不得把 `HandState` / `deck` / `burned` / 对手底牌传进去。改动需更新 `solver.test.ts`。
+- **挑战宗师模式（静态分流，不再逐手回退）**：`options.challenge` 下按人数选引擎——单挑翻前用离线 CFR+ 蓝图（只接 BB 防守）+ SB 放宽；单挑河牌 `solveStreetSubgame()`（双边范围、全树遍历全部 combo 同时更新的 vanilla CFR+，含加注）**默认启用**（`src/ai/aiPlayer.ts:107` 为 `ENABLE_RIVER_SOLVER = true`，自 v0.18.0 / 提交 `865fd2d` 起就是启用状态）：挑战档单挑河牌「面对下注」时直接求解，专家档单挑河牌则以 20% 概率采用（`aiPlayer.ts:1894`）；3 人用旧范围 + 多人谨慎 + 挑战启发式；4–6 人用专家启发式 + 多人谨慎。**禁止**再把挑战动作改回 `expertDecision.action`；`pickChallengeDecision` 已删除。改动需更新 `challenge.test.ts`、`solver.test.ts`、`families.test.ts`。
+- **CFR+ / 翻前蓝图 / 河牌求解 / 按街范围**：`src/ai/solver/` 是新的算法层。`cfr.ts` 提供遗憾匹配+、线性平均、矩阵博弈求解；`abstraction.ts` 按**真实胜率**分 10 个桶（不再用 Chen 分数）并提供牌面纹理 / 组合；`preflop.ts` 在 HU 抽象树上跑 CFR+ 并查 `data/preflop-blueprint.json`（24 桶、SB+BB 双边已接入运行时，SB 树禁用跛入）；`buildBlueprintRangeWeights()` 用蓝图动作频率推出翻后范围（策略一致先验）；`subgameTurn.ts` 做**转+河联合求解**（河牌按牌面分 3 桶、桶内矩阵平均；终点是摊牌，无需价值函数），默认启用；`subgame.ts` 对 HU 河牌做**双边范围 vanilla CFR+**（全树遍历、全部 combo 同时更新；check/bet 33/50/100，fold/call/raise；平均策略跳过前 50% 迭代、前 30 轮按 √T/(√T+1) 折减遗憾），**默认启用**（见上一条）；`ranges.ts` 做按街贝叶斯范围更新（已实现，但启发式仍用旧 `buildChallengeRanges`，因为新似然参数下基准更差）；`blueprint.ts` 负责加载。离线生成：`npm run gto:equity` / `npm run gto:blueprint`。**约束**：求解器只接收 `PlayerView` + 自己底牌；不得把 `HandState` / `deck` / `burned` / 对手底牌传进去。改动需更新 `solver.test.ts`。
 - **翻前决策必须走 EV 引擎（v0.21.0 起）**：`src/ai/preflopEv.ts` 对 fold / check / call / raise 逐个算期望值取最大，
   `decidePreflop` 只负责组装输入（范围估计、加注尺度、噪声）。**禁止**再引入「入池线 / 加注线 / 3-bet 线」这类阈值表——
   它们有三个结构性缺陷：跟注额不参与决策、位置只改阈值不改价值、加注不看弃牌率。
@@ -50,7 +50,7 @@
 - Node.js **22.12+**（推荐 24 LTS；Vite 8 与 Vitest 5 的 engines 要求），npm 10+。
 - 支持 Windows / macOS / Linux；仅安装 npm 依赖、自动安装 Node.js 时需要联网。
 - 硬件无特殊要求：双核 + 4 GB 内存即可游玩，**不需要独立显卡**；只有可选的本地大模型机器人需要显存 / 内存（详见 README「推荐硬件配置」）。
-- **打包安卓 APK（可选）**：需要 JDK 21+ 与 Android SDK（platform android-35 / build-tools 35）。本机默认路径：JDK `C:\AndroidToolchain\jdk21`、SDK `C:\AndroidToolchain\sdk`、Gradle 缓存 `C:\AndroidToolchain\gradle-home`；可用 `HOLDEM_JDK` / `ANDROID_HOME` / `GRADLE_USER_HOME` / `HOLDEM_APK_BUILD_DIR` 覆盖。只改 Web 代码日常开发不需要这套工具链。
+- **打包安卓 APK（可选）**：需要 JDK 21+ 与 Android SDK（platform android-35 / build-tools 35）。本机默认路径：JDK `C:\AndroidToolchain\jdk21\jdk-21.0.13+9`、SDK `C:\AndroidToolchain\sdk`、Gradle 缓存 `C:\AndroidToolchain\gradle-home`；可用 `HOLDEM_JDK` / `ANDROID_HOME` / `GRADLE_USER_HOME` / `HOLDEM_APK_BUILD_DIR` 覆盖。只改 Web 代码日常开发不需要这套工具链。
 - **Node.js 自动安装行为（重要）**：启动器会先检查本机；已有 Node.js 就直接跳过、绝不重复安装或升级；只有确实没有时才询问并自动安装官方 LTS。
   - Windows：`scripts/install-node.ps1`（下载 nodejs.org 官方 MSI + msiexec，会弹 UAC 管理员授权）。
   - macOS：`scripts/launcher-common.sh`（下载官方 pkg + `sudo installer`，需输入 Mac 登录密码；失败回退 Homebrew）。
@@ -85,15 +85,15 @@ node scripts/setup.mjs --check          # 只检查环境（启动器内部使�
 | --- | --- | --- |
 | 安装依赖 | `npm install --no-audit --no-fund` | 生成 `node_modules/`，退出码 0 |
 | 类型检查 | `npx tsc --noEmit` | 无输出、退出码 0 |
-| 测试 | `npm test` | `30 passed` 测试文件、`385 passed` 用例 |
+| 测试 | `npm test` | `32 passed` 测试文件、`441 passed` 用例 |
 | 基准 | `npm run bench` | 输出各对手 BB/100 + 95% CI + solver 占比 |
 | 剥削审计 | `npm run audit:exploit` | 对 6 种固定对手做配对 A/B（剥削层开/关），输出绝对胜率 + 配对差值 + 95% CI |
-| 翻前蓝图 | `npm run gto:blueprint` | 输出可利用度（当前 0.0176 BB/手 @6 万次迭代） |
+| 翻前蓝图 | `npm run gto:blueprint` | 输出可利用度（当前 0.0167 BB/手 @40000 迭代） |
 | 构建 | `npm run build` | 生成 `dist/`，退出码 0 |
 | 训练冒烟 | `npm run train -- --rounds=1 --seed=agent-smoke` | 约 2–4 秒，退出码 0 |
 | 打包 APK（可选） | `npm run apk` | 输出 `APK_RESULT=OK`，生成 `apk/德州扑克-v<version>.apk`（首次约 2–5 分钟） |
 | 打包 Windows 桌面版（可选） | `npm run exe` | 生成 `release/Holdem-Setup-<version>.exe`（约 117 MB）；`release/` 已 gitignore |
-| 打包单文件 HTML（跨平台） | `npm run single` | 生成 `release/德州扑克.html`（约 590 KB，零外部依赖，双击即玩）；自检 `npx electron scripts/smoke-single.cjs <html> <out>` 必须输出 `SINGLE_OK` |
+| 打包单文件 HTML（跨平台） | `npm run single` | 生成 `release/德州扑克.html`（约 1.21 MB（1,267,946 B），零外部依赖，双击即玩）；自检 `npx electron scripts/smoke-single.cjs <html> <out>` 必须输出 `SINGLE_OK` |
 
 ## 启动与冒烟检查
 
@@ -139,7 +139,7 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 6. **可复现种子**：引擎随机性由 `seed + handNo` 决定（`src/game/cards.ts`）；UI 默认每局随机种子（`src/ui/seed.ts`）。
 7. **体验随机**：风格/随机化只能小幅调整合法动作与参数，不得破坏难度档差异、不得读取隐藏信息；所有新增随机必须走种子派生流。真人化层（跨手统计 / 情绪 / 真人式失误）同样只能基于公开动作与自己的状态，不得利用隐藏信息。
 8. 不要改动启动脚本的编码/权限约定：`.bat` 为 **UTF-8 无 BOM + CRLF**；`.sh` / `.command` 为 **LF**，且 `.command` / `.sh` 在 git 索引中需要保留可执行位（`chmod +x` / `git update-index --chmod=+x`）。
-9. **版本号（每次提交必做）**：提交前同步递增 `package.json` 与 `package-lock.json` 的 `version`，并让版本号与本次改动在同一个提交里（当前 v0.15.x：修复 / 文档 / 微调递增补丁号，成块功能递增次版本）；提交信息带上版本号。详见 [README.md](README.md)「版本号约定」。
+9. **版本号（每次提交必做）**：提交前同步递增 `package.json` 与 `package-lock.json` 的 `version`，并让版本号与本次改动在同一个提交里（当前 v0.25.1：修复 / 文档 / 微调递增补丁号，成块功能递增次版本）；提交信息带上版本号。详见 [README.md](README.md)「版本号约定」。
 10. **手机 5/6 人桌布局（v0.22.0 起）**：四条不能回退的约束，改动前先用 `npm run shot:mobile` 出图对比：
     ①行牌提示条在手机端必须**随文档流**（不能 `position: fixed` 盖住工具栏与顶部座位）；
     ②中央 `.table-status` 在手机端**隐藏**——它和底部操作区完全重复，且正好压在左右座位上；
@@ -168,15 +168,27 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
     对比老版本时，把同一份 `session.ts` 放进老版本源码目录，用**完全相同的参数**跑。
     50BB 筹码下每手都是掷硬币式全下，400 手的 95% CI 约 ±250 BB/100，报数必须带 CI。
 
-    三个口径，按用途选：
+    四个口径，按用途选：
     - **对固定对手**（`session.ts`）：只看「对极端打法是否更狠」，单臂 CI 约 ±120/800 手。
     - **配对消融**（`session-paired.ts`）：同手同 seed 跑两臂比每手差值，方差缩减 26~28 倍，
       用来测 10~20 BB/100 级的小改动。**测求解器类改动不要用跟注站/弃牌怪**——
       面对纯被动线路时 `strongRead` 会直接跳过求解器，差值恒为 0。
     - **新旧对打**（`head2head.ts` + `git worktree`）：唯一能回答「整体是否变强」的口径。
-      2000 手（4000 局）CI 约 ±60。固定对手已接近天花板，整体强度只能这样测。
+      固定对手已接近天花板，整体强度只能这样测。
       用法：`git worktree add ../holdem-old <旧 commit>`，把 `scripts/session.ts` 复制过去，
-      然后 `HANDS=1200 npx tsx scripts/head2head.ts`；跑完 `git worktree remove --force ../holdem-old`。
+      然后 `HANDS=1200 OLD=1 npx tsx scripts/head2head.ts`；跑完 `git worktree remove --force ../holdem-old`。
+      **功效**：实测单手标准差 18.41 BB/局、同 seed 两局相关 ρ≈0.42（挑战 vs 专家）。
+      4000 局（2000 seed）配对 CI 约 ±68；**两边同档同代码时 ρ=1、有效样本只剩一半，约 ±81**
+      （旧公式把两局当独立样本会给 ±57，是低估的）。
+    - **并行分片**（`h2h-shard.ts` + `h2h-combine.ts`，v0.25.1 起入库）：
+      语义与 `head2head.ts` 完全一致（同 seed 命名、同对局循环），只是把 seed 区间切开、
+      每片写一个 JSONL，最后合并。8 进程接近饱和（实测 12.5~15 局/秒），再加进程收益递减。
+      用法见两个脚本的文件头。
+      **必须读 `pairedBySeed.ci95`，不要读顶层 `ci95`**——后者是为了和历史数字逐位对账
+      而保留的旧算法（把同 seed 的两局当独立样本，低估 √(1+ρ) 倍）。
+      「改动 A/B（同 seed 配对差分）」用 `h2h-diff.ts`（`npx tsx scripts/h2h-diff.ts 基线... -- 变体...`，
+      `--` 不能省），**不要拿两条单臂 CI 目测相减**——那会丢掉 18 倍的方差缩减。
+      **完整口径（工具 / 样本量 / 判定门槛）见 [`docs/测量规范.md`](docs/测量规范.md)**，报数前先读。
 
 14. **安卓 APK（每次版本更新必做）**：每个版本都要重新执行 `npm run apk` 并更新 `apk/` 目录（只保留当前版本文件），APK 的 versionName 由 `package.json` 自动生成；不要提交签名密钥（默认在 `C:\AndroidToolchain\keystore\`，已在 `android/.gitignore` 忽略）。
 
@@ -187,7 +199,7 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 | `src/game/` | 纯函数规则引擎（牌堆、牌型、下注、边池、状态机、受限视图、日志） |
 | `src/ai/` | 四档难度、范围模型、蒙特卡洛胜率、大模型机器人、训练参数；`data/` 为训练产物 |
 | `src/ui/` | React 界面（教程、大厅、牌桌、设置栏、调试面板、历史回放）；`mobile.ts` 为手机布局判定与安卓壳检测 |
-| `src/tests/` | Vitest 测试（32 个文件 / 430 个用例） |
+| `src/tests/` | Vitest 测试（32 个文件 / 441 个用例） |
 | `src/ai/style.ts` | 体验随机：机器人风格原型 / 下注尺度偏好 / 本地台词 / 变化率 |
 | `src/ai/humanModel.ts` | 真人化：跨手统计 / 情绪 / 对手利用 / 真人式失误 / fold-equity EV |
 | `src/ai/challenge.ts` | 挑战宗师：宗师原型 / 读计时与下注细节 / 计时伪装 / range 极化 / EV 尺度 |
@@ -206,6 +218,7 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 | `scripts/sync-data.mjs` | 一键同步旧版本数据（训练参数 / 经验库 / 训练产物 → 当前版本，覆盖前备份到 `backup/`；`--from` / `--dry-run` / `--list`） |
 | `scripts/install-node.ps1` / `scripts/launcher-common.sh` | 启动器共用的 Node.js 检测与自动安装（Windows / macOS；Ask/Auto/Check 或 ask/auto/never 模式） |
 | `scripts/train.ts` | 自博弈训练（参数进化 + few-shot 经验 + SFT 数据集 + 报告） |
+| `scripts/head2head.ts` / `h2h-shard.ts` / `h2h-combine.ts` | 新旧版本直接对打：单进程 / 并行分片 / 合并校验（结论只读配对口径 CI，见「关键约束」第 15 条） |
 | `android/` | Capacitor 7 安卓工程（应用图标 / 启动图 / 主题 / 清单 / Gradle 配置已定制） |
 | `apk/` | 当前版本的安卓安装包（release 签名，交付物） |
 | `capacitor.config.json` | 安卓壳配置（appId / 应用名 / webDir=dist / 允许 http 本地模型） |
@@ -216,18 +229,18 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 ## 验收清单（DoD）
 
 - [ ] `node scripts/setup.mjs --agent` 退出码 0，输出 `SETUP_RESULT=OK`
-- [ ] `npm test`：32 个测试文件、422 个用例全部通过
+- [ ] `npm test`：32 个测试文件、441 个用例全部通过
 - [ ] `npm run build`：生成 `dist/`，无 TypeScript 错误
 - [ ] `npm run dev -- --host 127.0.0.1 --port 5173 --strictPort` 可启动，HTTP 探测 200
 - [ ] 启动脚本冒烟（按平台）：Windows `启动德州扑克.bat --no-open` / macOS-Linux `bash 启动德州扑克.sh --no-open` 能起服务并返回 200
 - [ ] Node.js 检测语义：已有 Node 时启动器直接跳过安装；缺 Node + `--agent` 时 exit 1 且不安装（需要自动装时用 `--install-node`）
-- [ ] `package.json` 版本号已按约定递增（当前 v0.15.x），并与本次改动在同一个提交
+- [ ] `package.json` 版本号已按约定递增（当前 v0.25.1），并与本次改动在同一个提交
 - [ ] `npm run apk` 退出码 0 且输出 `APK_RESULT=OK`；`apk/` 内只有与 `package.json` 版本一致的 APK
 - [ ] （若本次改了前端）`npm run exe` 退出码 0；`release/Holdem-Setup-<version>.exe` 存在；用冒烟模式跑打包后的 `release/win-unpacked/德州扑克.exe` 输出 `SMOKE_OK`
 - [ ] APK 冒烟：`aapt2 dump badging` 的 versionName 与 `package.json` 一致、label 为「德州扑克」；`apksigner verify` 通过（release 签名）
 - [ ] 手机布局冒烟：390×844 / 360×640 / 844×390 下进行中牌桌与操作区一屏（无纵向滚动 / 横向溢出），桌面 1440×900 正常
 - [ ] 一键同步数据冒烟：`node scripts/sync-data.mjs --help` 退出码 0；`--list` 能识别同级旧版本目录
-- [ ] 挑战宗师冒烟：`npm test` 中 `challenge.test.ts` + `solver.test.ts` + `families.test.ts` 全绿；`npm run bench` 能输出配对 95% CI；当前挑战 vs 专家为 -9.6（CI 含 0），**不得在文档/提交信息里宣称“已证明更强”**；难度选择「挑战宗师」后座位显示徽标、调试面板出现 `CFR+ 蓝图` / `challenge-multiway`（河牌 MCCFR 默认关闭），无 console 报错
+- [ ] 挑战宗师冒烟：`npm test` 中 `challenge.test.ts` + `solver.test.ts` + `families.test.ts` 全绿；`npm run bench` 能输出配对 95% CI；当前挑战 vs 专家为 +6.3 BB/100，配对 95% CI [−8.9, 21.5]（80,000 局，含 0），**不得在文档/提交信息里宣称“已证明更强”**；难度选择「挑战宗师」后座位显示徽标、调试面板出现 `CFR+ 蓝图` / `challenge-multiway`（河牌单街求解默认启用），无 console 报错
 - [ ] 工作区没有 `node_modules/`、`dist/`、日志或临时脚本被误加入提交（`.gitignore` 已覆盖）
 
 ## 常见问题

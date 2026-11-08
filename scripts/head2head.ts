@@ -6,18 +6,31 @@
  * 同样的牌、同样的座位轮换，净赢筹码就是相对强度差。
  *
  * 用法：
- *   HANDS=800 OLD=1 CHALLENGE=1 npx tsx scripts/head2head.ts
+ *   HANDS=800 OLD=1 NEW_CHALLENGE=1 npx tsx scripts/head2head.ts     # 挑战 vs 挑战（同档对打）
+ *   HANDS=800 OLD=0 NEW_CHALLENGE=1 npx tsx scripts/head2head.ts     # 挑战 vs 专家（默认的「提升」对照）
  *
  * 环境变量：
- *   HANDS     每座位手数（总手数 = HANDS × 2）
- *   OLD       老版本是否也用挑战宗师（1=挑战 vs 挑战，0=挑战 vs 专家）
- *   NEW_EXP   新版本用专家档而非挑战档（做「专家 vs 挑战」对照时用）
- *   OLD_DIR   老版本源码目录（默认 D:/德州扑克_old）
+ *   HANDS           seed 个数（总手数 = HANDS × 2，每个 seed 换座位打两局）
+ *   OLD            老版本是否也用挑战宗师（默认 1 = 挑战 vs 挑战；0 = 挑战 vs 专家）
+ *   NEW_CHALLENGE  新版本是否用挑战宗师（默认 1；设 0 可做「专家 vs 挑战」反向对照）
+ *   STACK / MAX_ITER / NEW_COMBOS / NEW_ITERS / NEW_FLOP_BP / NEW_SBWIDE /
+ *   NEW_BLUEPRINT / NEW_SOLVER / NEW_EXPLOIT / NEW_BP_RANGES 见下面各自定义
+ *
+ * 老版本源码目录**写死**在 import 里（`../../德州扑克_old`），换目录要改 import；
+ * 不存在 `OLD_DIR` 环境变量，也不存在 `NEW_EXP`（要反向对照用 `NEW_CHALLENGE=0`）。
+ *
+ * 输出字段：
+ *   seeds / games            seed 个数 / 总局数（= seeds × 2）
+ *   bbPer100                 点估计（两局平均，BB/100）
+ *   ci95                     **正确口径**：按 seed 配对求标准误（v0.25.1 起）
+ *   corrSameSeed             同 seed 两局的相关系数 ρ（ρ=1 说明换座位没有产生新信息）
+ *   ci95Naive                旧口径（把 2H 局当独立样本），只用于和历史数字逐位对账
  */
 import { act, createTable, startNextHand } from '../src/game/stateMachine';
 import { buildPlayerView } from '../src/game/playerView';
 import { decide as decideNew } from '../src/ai/aiPlayer';
 import { decide as decideOld } from '../../德州扑克_old/src/ai/aiPlayer';
+import { assignChallengeArchetypes } from '../src/ai/challenge';
 import type { PlayerAction, TableState } from '../src/game/types';
 
 const HANDS = Number(process.env.HANDS ?? 600);
@@ -35,6 +48,12 @@ const NEW_BLUEPRINT = process.env.NEW_BLUEPRINT !== '0';
 const NEW_SOLVER = process.env.NEW_SOLVER !== '0';
 const NEW_EXPLOIT = process.env.NEW_EXPLOIT !== '0';
 const NEW_BP_RANGES = process.env.NEW_BP_RANGES !== '0';
+/**
+ * ARCH=fixed（默认）钉死宗师原型 = 0，与历史数字可比；
+ * ARCH=assign 用 `assignChallengeArchetypes(seed, 座位 id)` 分配（与 `stateMachine.ts` 同源）。
+ * 只改测量面，不改 AI 行为；原型只影响挑战档，专家档不受影响。
+ */
+const ARCH = process.env.ARCH ?? 'fixed';
 /**
  * 蒙特卡洛上限（0 = 不设上限，用各档位自己的 profile 值）。
  *
@@ -54,7 +73,15 @@ async function play(seed: string, newSeat: number): Promise<number> {
     playerCount: 2, startingStack: STACK, smallBlind: 10, bigBlind: 20, seed,
     difficulty: 'expert', challengeMode: true,
   });
-  table.players = table.players.map((p) => ({ ...p, styleId: 0, challengeArchetypeId: 0 }));
+  // 与 `h2h-shard.ts` 逐字一致：ARCH=assign 按 seed 分配宗师原型，默认 fixed 钉死 0。
+  const archetypeIds = ARCH === 'assign'
+    ? assignChallengeArchetypes(seed, table.players.map((p) => p.id))
+    : null;
+  table.players = table.players.map((p) => ({
+    ...p,
+    styleId: 0,
+    challengeArchetypeId: archetypeIds ? archetypeIds.get(p.id) ?? 0 : 0,
+  }));
   table = startNextHand(table);
   const start = table.handStartStacks[newSeat] ?? 0;
 
@@ -93,24 +120,62 @@ async function play(seed: string, newSeat: number): Promise<number> {
   return table.players[newSeat].stack - start;
 }
 
-const nets: number[] = [];
+/**
+ * 每个 seed 的两局（换座位）记成一对。
+ *
+ * 为什么不能像旧实现那样把两局当两个独立样本：同 seed 用的是同一副牌，两局净胜强正相关。
+ * 极端情形是「两边同档同代码」——实测 1500/1500 手 `net(seat0) === net(seat1)` 逐位相等，
+ * ρ 恰好 = 1，换座位根本没有产生新信息，旧公式 `sd/√(2H)` 把 CI 低估了 √2；
+ * 挑战 vs 专家实测 ρ ≈ 0.41，旧公式低估约 19%。（2026-11-08 复核，见 v0.25.1）
+ *
+ * 正确做法：把每对的两局取平均当作一个观测，对 H 个观测求标准误。
+ * 这样 ρ=1 时自动退化成 `sd/√H`，ρ=0 时自动等价于 `sd/√(2H)`，不需要单独估 ρ。
+ */
+const pairs: Array<[number, number]> = [];
 for (let h = 0; h < HANDS; h++) {
   const seed = `h2h-${h}`;
-  // 同 seed 打两遍、互换座位，消掉牌运与位置偏差
-  nets.push(await play(seed, 0));
-  nets.push(-(await play(seed, 1)));
+  const seat0 = await play(seed, 0);
+  const seat1 = -(await play(seed, 1));
+  pairs.push([seat0, seat1]);
 }
 
-const n = nets.length;
-const mean = nets.reduce((a, b) => a + b, 0) / n;
-const varr = nets.reduce((a, b) => a + (b - mean) ** 2, 0) / Math.max(1, n - 1);
-const se = Math.sqrt(varr / n);
+const n = pairs.length * 2;
+const pairMeans = pairs.map(([a, b]) => (a + b) / 2);
+const H = pairMeans.length;
+const mean = pairMeans.reduce((a, b) => a + b, 0) / H;
+const varr = pairMeans.reduce((a, b) => a + (b - mean) ** 2, 0) / Math.max(1, H - 1);
+const se = Math.sqrt(varr / H);
+
+// 旧口径（把 2H 局当独立样本）仍然输出，方便和历史数字逐位对账。
+const flat = pairs.flat();
+const flatMean = flat.reduce((a, b) => a + b, 0) / flat.length;
+const flatVar = flat.reduce((a, b) => a + (b - flatMean) ** 2, 0) / Math.max(1, flat.length - 1);
+const seNaive = Math.sqrt(flatVar / flat.length);
+
+// 同 seed 两局的相关系数：ρ=1 说明这批对局的两局完全重复（同档对打的常态）。
+const xs = pairs.map(([a]) => a);
+const ys = pairs.map(([, b]) => b);
+const mx = xs.reduce((a, b) => a + b, 0) / H;
+const my = ys.reduce((a, b) => a + b, 0) / H;
+let cov = 0;
+let vx = 0;
+let vy = 0;
+for (let i = 0; i < H; i++) {
+  cov += (xs[i] - mx) * (ys[i] - my);
+  vx += (xs[i] - mx) ** 2;
+  vy += (ys[i] - my) ** 2;
+}
+const corr = cov / Math.max(1e-12, Math.sqrt(vx * vy));
+
 const bb = (v: number) => Number((v / 20 * 100).toFixed(1));
 console.log(JSON.stringify({
   newTier: (NEW_CHALLENGE ? '挑战宗师' : '专家') +
-    ` [sbWide=${NEW_SBWIDE} bp=${NEW_BLUEPRINT} solver=${NEW_SOLVER} exploit=${NEW_EXPLOIT}]`,
+    ` [sbWide=${NEW_SBWIDE} bp=${NEW_BLUEPRINT} solver=${NEW_SOLVER} exploit=${NEW_EXPLOIT} arch=${ARCH}]`,
   oldTier: OLD_CHALLENGE ? '挑战宗师' : '专家',
-  hands: n,
+  seeds: H,
+  games: n,
   bbPer100: bb(mean),
   ci95: [bb(mean - 1.96 * se), bb(mean + 1.96 * se)],
+  corrSameSeed: Number(corr.toFixed(4)),
+  ci95Naive: [bb(flatMean - 1.96 * seNaive), bb(flatMean + 1.96 * seNaive)],
 }));

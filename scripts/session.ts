@@ -8,6 +8,7 @@
 import { act, createTable, startNextHand } from '../src/game/stateMachine';
 import { buildPlayerView } from '../src/game/playerView';
 import { decide } from '../src/ai/aiPlayer';
+import { assignChallengeArchetypes } from '../src/ai/challenge';
 import type { Difficulty, PlayerAction, TableState } from '../src/game/types';
 
 type Kind = 'caller' | 'folder' | 'shover';
@@ -26,6 +27,8 @@ const FLOP_BP = process.env.FLOP_BP === '1';
  * 测出来的「挑战 vs 专家」自然只有 0。真实游戏（`useAiDriver`）对本地 AI 不传这个参数。
  */
 const MAX_ITER = Number(process.env.MAX_ITER ?? 0);
+/** ARCH=fixed（默认）钉死宗师原型 0；ARCH=assign 按 seed 分配（与 stateMachine.ts 同源）。只改测量面。 */
+const ARCH = process.env.ARCH ?? 'fixed';
 const STACK = Number(process.env.STACK ?? 1000);
 
 function fixed(kind: Kind, legal: { canCheck: boolean; canCall: boolean; canAllIn: boolean }): PlayerAction {
@@ -42,11 +45,20 @@ function fixed(kind: Kind, legal: { canCheck: boolean; canCall: boolean; canAllI
 }
 
 async function session(): Promise<number[]> {
+  const tableSeed = `sess-${KIND}-${SEAT}`;
   let table: TableState = createTable({
     playerCount: 2, startingStack: STACK, smallBlind: 10, bigBlind: 20,
-    seed: `sess-${KIND}-${SEAT}`, difficulty: DIFF, challengeMode: CHALLENGE,
+    seed: tableSeed, difficulty: DIFF, challengeMode: CHALLENGE,
   });
-  table.players = table.players.map((p) => ({ ...p, styleId: 0, challengeArchetypeId: 0 }));
+  // ARCH=assign：按 seed 分配宗师原型（与 stateMachine.ts 同源）；默认 fixed 钉死 0，与历史数字可比。
+  const archetypeIds = ARCH === 'assign'
+    ? assignChallengeArchetypes(tableSeed, table.players.map((p) => p.id))
+    : null;
+  table.players = table.players.map((p) => ({
+    ...p,
+    styleId: 0,
+    challengeArchetypeId: archetypeIds ? archetypeIds.get(p.id) ?? 0 : 0,
+  }));
   const nets: number[] = [];
 
   for (let h = 0; h < HANDS; h++) {
@@ -89,6 +101,7 @@ console.log(JSON.stringify({
   version: process.env.VER_TAG ?? 'v0.22',
   difficulty: CHALLENGE ? '挑战宗师' : DIFF,
   opponent: KIND,
+  arch: ARCH,
   seat: SEAT,
   hands: n,
   bbPer100: Number((mean / 20 * 100).toFixed(1)),

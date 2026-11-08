@@ -38,3 +38,6 @@ dist-single/
 
 # 手机截图对比（临时产物）
 .shot-*.png
+
+# 分片测量的中间结果（h2h-shard.ts 的 JSONL，体积大且可重跑）
+tmp/
