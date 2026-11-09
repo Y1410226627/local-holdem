@@ -33,7 +33,8 @@ const challengeOptions = {
 };
 
 async function run(): Promise<number[]> {
-  const tableSeed = `sess-h2h-${EXPERT_SEAT}`;
+  // seed 必须含 ARCH：否则 assign 与 fixed 是同一条牌序重跑，当成两组独立样本会把 CI 虚缩 √2。
+  const tableSeed = `sess-h2h-${EXPERT_SEAT}-${ARCH}`;
   let table: TableState = createTable({
     playerCount: 2,
     startingStack: STACK,
@@ -74,7 +75,7 @@ async function run(): Promise<number[]> {
         idx === CH_SEAT
           ? await decide(view, 'expert', challengeOptions).then((r) => {
               chDecisions += 1;
-              if (/剥削|读人/.test(r.reasoning ?? '')) chExploitHits += 1;
+              if (/剥削|读人/.test(r.debug?.reasoning ?? '')) chExploitHits += 1;
               return r.action;
             })
           : (await decide(view, 'expert', { challenge: false })).action;
