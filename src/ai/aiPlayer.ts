@@ -33,6 +33,15 @@ import {
   type ExploitProfile,
 } from './exploit';
 import { gtoBoundaryAdjust, gtoClosenessFor, gtoEvSizeChoice } from './gto';
+import { boardTexture, rangeBetTendency, textureSizeFactor } from './flopTexture';
+import type { BoardTexture } from './flopTexture';
+import { readPotContext, threeBetCbetBonus } from './potContext';
+import type { PotContext } from './potContext';
+
+/** 挑战档翻牌层：范围下注倾向 = 纹理倾向 + 3-bet 进攻方加成，封顶 0.75。 */
+function flopRangeBetTendency(flopCtx: { texture: BoardTexture; pot: PotContext }): number {
+  return Math.min(0.75, rangeBetTendency(flopCtx.texture) + threeBetCbetBonus(flopCtx.pot));
+}
 import { gtoPushFoldAdvice } from './gtoAdvice';
 import { depthLimitedSearch, estimateActionEv } from './search';
 import { solveStreetSubgame } from './solver/subgame';
@@ -145,6 +154,8 @@ const HU_SB_PREFLOP = {
 export interface AIDecisionOptions {
   /** 测试 / 降载用：限制蒙特卡洛模拟次数（取 min(默认值, maxIterations)）。 */
   maxIterations?: number;
+  /** 消融对照用：传 false 关闭挑战档翻牌层（默认开）。 */
+  flopLayer?: boolean;
   /**
    * 挑战模式（宗师 AI）：使用挑战档 profile + 宗师原型 + 读下注细节 / 思考时间。
    * 训练 / 对照评估时忽略（profileOverride 优先）。
@@ -242,6 +253,8 @@ interface DecisionContext {
   closeness: number;
   /** 是否启用剥削层（消融对照用）。 */
   exploitEnabled: boolean;
+  /** 是否启用挑战档翻牌层（消融对照用；默认开）。 */
+  flopLayer: boolean;
   /** 挑战模式的宗师原型 id。 */
   archetypeId?: number;
   /** 当前手读到的对手思考时间（挑战模式）。 */
@@ -979,7 +992,15 @@ function decideExpertPostflop(
   let note: string;
 
   if (legal.canCheck) {
-    const size = pickExpertBetFraction(ctx, equity, exploit.sizeBias);
+    // 挑战档翻牌层：牌面纹理修正尺度（干燥面缩小、湿润面放大）。
+    // 专家档不走这里（ctx.challenge 为 false），行为保持逐位不变。
+    const flopCtx =
+      ctx.challenge && ctx.flopLayer && view.street === 'flop'
+        ? { texture: boardTexture(view.board), pot: readPotContext(view) }
+        : null;
+    const texture = flopCtx?.texture ?? null;
+    const baseSize = pickExpertBetFraction(ctx, equity, exploit.sizeBias);
+    const size = texture ? Math.min(1, baseSize * textureSizeFactor(texture)) : baseSize;
     const bet = buildAggressive(legal, targetFromFraction(view, legal, size));
     if (equity >= 0.78) {
       if (spr <= 2.5 && legal.canAllIn && legal.maxRaiseTo > legal.currentBet) {
@@ -1005,6 +1026,10 @@ function decideExpertPostflop(
     ) {
       action = bet;
       note = inPosition ? '晚位极化诈唬' : '按平衡频率诈唬';
+    } else if (flopCtx && bet && equity >= 0.3 && rng() < flopRangeBetTendency(flopCtx)) {
+      // 挑战档翻牌层：干燥面 / 3-bet 进攻方，把一部分「本会过牌」转成小尺度范围下注。
+      action = bet;
+      note = '范围下注（挑战翻牌层）';
     } else {
       action = { type: 'check' };
       note = '过牌，保留摊牌价值';
@@ -1576,6 +1601,7 @@ async function decideCore(
     challenge,
     closeness,
     exploitEnabled: options.exploit !== false,
+    flopLayer: options.flopLayer !== false,
     archetypeId,
     timingTells,
     bettingTells,

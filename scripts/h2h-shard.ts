@@ -109,6 +109,8 @@ async function play(seed: string, newSeat: number): Promise<number> {
       options.blueprintRanges = NEW_BP_RANGES;
       options.exploit = NEW_EXPLOIT;
       if (!NEW_SOLVER) options.turnRiver = { ...(options.turnRiver ?? {}), enabled: false };
+      // NEW_FLOP=0：消融关闭挑战档翻牌层（对照实验用）。
+      if (process.env.NEW_FLOP === '0') options.flopLayer = false;
     }
     const decision = await (side.decide as typeof decideNew)(view as never, 'expert', options);
     const action: PlayerAction = decision.action;
