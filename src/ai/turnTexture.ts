@@ -36,24 +36,25 @@ export const TURN_NEUTRAL: TurnTexture = {
 };
 
 /**
- * @param board 当前公共牌（含这张转牌，长度应为 4）
+ * @param board 当前公共牌（含这张新牌）。转牌长度 4、河牌长度 5，取**最后一张**作为新牌，
+ *              其余作为「之前几条街」用于比较。
  */
 export function turnTexture(board: readonly Card[]): TurnTexture {
   if (board.length < 4) return TURN_NEUTRAL;
 
-  const turn = board[3];
-  const seen = board.slice(0, 4);
+  const turn = board[board.length - 1];
+  const seen = board;
 
   const suitCount = new Map<string, number>();
   for (const card of seen) suitCount.set(card.suit, (suitCount.get(card.suit) ?? 0) + 1);
   const flushComplete = Math.max(...suitCount.values()) >= 4;
 
   const ranks = seen.map((c) => c.rank);
-  const paired = new Set(ranks).size < 4;
+  const paired = new Set(ranks).size < seen.length;
 
-  const flopRanks = board.slice(0, 3).map((c) => c.rank);
-  const overcard = turn.rank > Math.max(...flopRanks);
-  const straightish = flopRanks.some((r) => Math.abs(turn.rank - r) <= 2);
+  const priorRanks = board.slice(0, board.length - 1).map((c) => c.rank);
+  const overcard = turn.rank > Math.max(...priorRanks);
+  const straightish = priorRanks.some((r) => Math.abs(turn.rank - r) <= 2);
 
   let scare = 0;
   if (flushComplete) scare += 0.5;

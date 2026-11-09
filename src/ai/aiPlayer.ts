@@ -1022,6 +1022,9 @@ function decideExpertPostflop(
       layered && view.street === 'flop'
         ? { texture: boardTexture(view.board), pot: readPotContext(view) }
         : null;
+    // 转牌层：新牌纹理决定「继续施压」还是「收手」。
+    // 曾把同一逻辑延伸到河牌，实测 Δ=−0.1 [−2.9, +2.7]（15,200 局配对），完全无效，已撤回——
+    // 河牌只有面对下注时才由单街求解器接管，其余路径下这套调整没有作用面。
     const turnCtx = layered && view.street === 'turn' ? turnTexture(view.board) : null;
     const sizeFactor = flopCtx
       ? textureSizeFactor(flopCtx.texture)

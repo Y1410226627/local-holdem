@@ -39,6 +39,14 @@ describe('turnTexture：转牌是空白牌还是吓人的牌', () => {
     expect(turnSizeFactor(scary)).toBeGreaterThan(1);
   });
 
+  it('河牌取最后一张，而不是固定索引 3', () => {
+    const turnOnly = turnTexture([c(9, 's'), c(7, 'h'), c(2, 'd'), c(3, 'c')]);
+    const riverToo = turnTexture([c(9, 's'), c(7, 'h'), c(2, 'd'), c(3, 'c'), c(13, 'd')]);
+    expect(turnOnly.overcard).toBe(false);
+    expect(riverToo.overcard).toBe(true); // K 高于此前所有牌
+    expect(riverToo.scare).toBeGreaterThan(turnOnly.scare);
+  });
+
   it('牌面不足四张时返回中性值，调用方据此跳过调整', () => {
     expect(turnTexture([c(14, 's'), c(9, 'h'), c(2, 'd')])).toEqual(TURN_NEUTRAL);
     expect(turnSizeFactor(TURN_NEUTRAL)).toBe(1);

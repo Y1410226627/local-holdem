@@ -27,6 +27,8 @@ export const GTO_CLOSENESS: Record<GtoDifficultyLevel, number> = {
   normal: 0.12,
   hard: 0.3,
   expert: 0.55,
+  // 0.92：实测调到 1.0 后 Δ=+1.2 [-2.5, +4.9]（15,200 局配对），
+  // CI 上界 < +10，无法证明存在有意义的收益，按三态规则保持原值。
   challenge: 0.92,
 };
 
