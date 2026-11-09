@@ -38,8 +38,21 @@ import type { BoardTexture } from './flopTexture';
 import { readPotContext, threeBetCbetBonus } from './potContext';
 import type { PotContext } from './potContext';
 
-/** 挑战档翻牌层：范围下注倾向 = 纹理倾向 + 3-bet 进攻方加成，封顶 0.75。 */
-function flopRangeBetTendency(flopCtx: { texture: BoardTexture; pot: PotContext }): number {
+/**
+ * 挑战档翻牌层：范围下注倾向 = 纹理倾向 + 3-bet 进攻方加成，封顶 0.75。
+ *
+ * 但有个硬前提：**范围下注靠的是弃牌率**。对不弃牌的对手（跟注站）下注就是送钱，
+ * 实测在跟注站身上会亏 15.6 BB/100（995.5 → 979.9）。所以有足够样本且对手
+ * 面对下注弃牌率很低时，直接关闭这一层，退回原来的胜率驱动打法。
+ */
+function flopRangeBetTendency(
+  flopCtx: { texture: BoardTexture; pot: PotContext },
+  ctx: DecisionContext,
+): number {
+  const fold = ctx.opponents?.avgFoldToBet;
+  const confidence = ctx.opponents?.confidence ?? 0;
+  const knownStation = fold !== null && fold !== undefined && confidence >= 0.25 && fold < 0.3;
+  if (knownStation) return 0;
   return Math.min(0.75, rangeBetTendency(flopCtx.texture) + threeBetCbetBonus(flopCtx.pot));
 }
 import { gtoPushFoldAdvice } from './gtoAdvice';
@@ -1026,7 +1039,7 @@ function decideExpertPostflop(
     ) {
       action = bet;
       note = inPosition ? '晚位极化诈唬' : '按平衡频率诈唬';
-    } else if (flopCtx && bet && equity >= 0.3 && rng() < flopRangeBetTendency(flopCtx)) {
+    } else if (flopCtx && bet && equity >= 0.3 && rng() < flopRangeBetTendency(flopCtx, ctx)) {
       // 挑战档翻牌层：干燥面 / 3-bet 进攻方，把一部分「本会过牌」转成小尺度范围下注。
       action = bet;
       note = '范围下注（挑战翻牌层）';
