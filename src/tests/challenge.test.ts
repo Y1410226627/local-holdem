@@ -115,13 +115,27 @@ describe('宗师原型分配', () => {
 });
 
 describe('applyChallengeVariant：原型偏移有界', () => {
-  it('压力型更爱诈唬 / 尺度更大，陷阱型更爱慢玩', () => {
+  it('三个诈唬维度都不得高于专家基准（乘子上限夹到 1.0）', () => {
+    // 挑战档只做加法、不做「更激进的参数」：原型可以更保守，但不能比专家档更爱诈唬。
+    for (let id = 0; id < CHALLENGE_ARCHETYPE_COUNT; id++) {
+      const v = applyChallengeVariant(CHALLENGE_PROFILE, id);
+      expect(v.postflop.bluffRate).toBeLessThanOrEqual(CHALLENGE_PROFILE.postflop.bluffRate);
+      expect(v.postflop.semiBluffRate).toBeLessThanOrEqual(
+        CHALLENGE_PROFILE.postflop.semiBluffRate,
+      );
+      expect(v.preflop.bluffRaiseRate).toBeLessThanOrEqual(
+        CHALLENGE_PROFILE.preflop.bluffRaiseRate,
+      );
+    }
+  });
+
+  it('性格差异仍在：陷阱型更爱慢玩，且比其它原型诈唬更少', () => {
     const pressure = applyChallengeVariant(CHALLENGE_PROFILE, 1); // 压力宗师
     const trap = applyChallengeVariant(CHALLENGE_PROFILE, 2); // 陷阱宗师
     const solver = applyChallengeVariant(CHALLENGE_PROFILE, 0); // 均衡宗师
-    expect(pressure.postflop.bluffRate).toBeGreaterThan(solver.postflop.bluffRate);
     expect(trap.preflop.trapRate).toBeGreaterThan(solver.preflop.trapRate);
     expect(trap.postflop.bluffRate).toBeLessThan(pressure.postflop.bluffRate);
+    expect(trap.postflop.bluffRate).toBeLessThan(solver.postflop.bluffRate);
   });
 
   it('偏移不越界且不修改原 profile', () => {

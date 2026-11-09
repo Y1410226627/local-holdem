@@ -150,14 +150,21 @@ export function applyChallengeVariant(
   const archetype = challengeArchetype(archetypeId);
   const pre = { ...profile.preflop };
   const post = { ...profile.postflop };
+  // 挑战档 = 专家档 + 增量，不是「另一套更激进的参数」。
+  // 五原型 archetype.bluff = {1.00,1.55,0.65,1.15,1.35}，直接相乘会让 3/5 原型的诈唬率
+  // 高于专家基准（压力 0.248 / 混沌 0.216 / 反制 0.184 vs 专家 0.16）——这是白送的钱。
+  // 因此三个诈唬维度只许「不高于专家基准」：乘子上限夹到 1.0。
+  // 性格差异由 sizing / trap / timing / aggression 承载，不靠多诈唬区分。
+  const bluffMul = Math.min(1, archetype.bluff);
+  const semiBluffMul = Math.min(1, 0.85 + archetype.bluff * 0.2);
   pre.bluffRaiseRate = round3(
-    clamp(profile.preflop.bluffRaiseRate * archetype.bluff, 0.005, 0.45),
+    clamp(profile.preflop.bluffRaiseRate * bluffMul, 0.005, 0.45),
   );
   pre.mixRaiseRate = round3(clamp(profile.preflop.mixRaiseRate * archetype.aggression, 0, 0.6));
   pre.trapRate = round3(clamp(profile.preflop.trapRate * archetype.trap, 0, 0.4));
-  post.bluffRate = round3(clamp(profile.postflop.bluffRate * archetype.bluff, 0.005, 0.5));
+  post.bluffRate = round3(clamp(profile.postflop.bluffRate * bluffMul, 0.005, 0.5));
   post.semiBluffRate = round3(
-    clamp(profile.postflop.semiBluffRate * (0.85 + archetype.bluff * 0.2), 0, 0.65),
+    clamp(profile.postflop.semiBluffRate * semiBluffMul, 0, 0.65),
   );
   post.valueThreshold = round3(
     clamp(profile.postflop.valueThreshold - (archetype.sizing - 1) * 0.03, 0.5, 0.95),
