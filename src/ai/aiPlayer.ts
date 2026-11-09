@@ -37,6 +37,19 @@ import { boardTexture, rangeBetTendency, textureSizeFactor } from './flopTexture
 import type { BoardTexture } from './flopTexture';
 import { readPotContext, threeBetCbetBonus } from './potContext';
 import type { PotContext } from './potContext';
+import { turnBarrelTendency, turnSizeFactor, turnTexture } from './turnTexture';
+
+/**
+ * 对手在这条线上会不会弃牌？范围下注 / 二次开火都靠弃牌率赚钱，
+ * 对不弃牌的对手（跟注站）下注等于送钱。样本不足时按「会弃」处理（不偏保守）。
+ */
+function opponentLikelyFolds(ctx: DecisionContext): boolean {
+  const fold = ctx.opponents?.avgFoldToBet;
+  const confidence = ctx.opponents?.confidence ?? 0;
+  if (fold === null || fold === undefined) return true;
+  if (confidence < 0.25) return true;
+  return fold >= 0.3;
+}
 
 /**
  * 挑战档翻牌层：范围下注倾向 = 纹理倾向 + 3-bet 进攻方加成，封顶 0.75。
@@ -49,10 +62,7 @@ function flopRangeBetTendency(
   flopCtx: { texture: BoardTexture; pot: PotContext },
   ctx: DecisionContext,
 ): number {
-  const fold = ctx.opponents?.avgFoldToBet;
-  const confidence = ctx.opponents?.confidence ?? 0;
-  const knownStation = fold !== null && fold !== undefined && confidence >= 0.25 && fold < 0.3;
-  if (knownStation) return 0;
+  if (!opponentLikelyFolds(ctx)) return 0;
   return Math.min(0.75, rangeBetTendency(flopCtx.texture) + threeBetCbetBonus(flopCtx.pot));
 }
 import { gtoPushFoldAdvice } from './gtoAdvice';
@@ -1007,13 +1017,19 @@ function decideExpertPostflop(
   if (legal.canCheck) {
     // 挑战档翻牌层：牌面纹理修正尺度（干燥面缩小、湿润面放大）。
     // 专家档不走这里（ctx.challenge 为 false），行为保持逐位不变。
+    const layered = ctx.challenge && ctx.flopLayer;
     const flopCtx =
-      ctx.challenge && ctx.flopLayer && view.street === 'flop'
+      layered && view.street === 'flop'
         ? { texture: boardTexture(view.board), pot: readPotContext(view) }
         : null;
-    const texture = flopCtx?.texture ?? null;
+    const turnCtx = layered && view.street === 'turn' ? turnTexture(view.board) : null;
+    const sizeFactor = flopCtx
+      ? textureSizeFactor(flopCtx.texture)
+      : turnCtx
+        ? turnSizeFactor(turnCtx)
+        : 1;
     const baseSize = pickExpertBetFraction(ctx, equity, exploit.sizeBias);
-    const size = texture ? Math.min(1, baseSize * textureSizeFactor(texture)) : baseSize;
+    const size = Math.min(1, baseSize * sizeFactor);
     const bet = buildAggressive(legal, targetFromFraction(view, legal, size));
     if (equity >= 0.78) {
       if (spr <= 2.5 && legal.canAllIn && legal.maxRaiseTo > legal.currentBet) {
@@ -1039,10 +1055,19 @@ function decideExpertPostflop(
     ) {
       action = bet;
       note = inPosition ? '晚位极化诈唬' : '按平衡频率诈唬';
-    } else if (flopCtx && bet && equity >= 0.3 && rng() < flopRangeBetTendency(flopCtx, ctx)) {
-      // 挑战档翻牌层：干燥面 / 3-bet 进攻方，把一部分「本会过牌」转成小尺度范围下注。
+    } else if (
+      bet &&
+      equity >= 0.3 &&
+      rng() <
+        (flopCtx
+          ? flopRangeBetTendency(flopCtx, ctx)
+          : turnCtx && opponentLikelyFolds(ctx)
+            ? turnBarrelTendency(turnCtx)
+            : 0)
+    ) {
+      // 挑战档：翻牌干燥面 / 3-bet 进攻方范围下注；转牌空白牌二次开火。
       action = bet;
-      note = '范围下注（挑战翻牌层）';
+      note = flopCtx ? '范围下注（翻牌层）' : '二次开火（转牌层）';
     } else {
       action = { type: 'check' };
       note = '过牌，保留摊牌价值';
