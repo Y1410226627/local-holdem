@@ -14,7 +14,7 @@
  *   OLD            老版本是否也用挑战宗师（默认 1 = 挑战 vs 挑战；0 = 挑战 vs 专家）
  *   NEW_CHALLENGE  新版本是否用挑战宗师（默认 1；设 0 可做「专家 vs 挑战」反向对照）
  *   STACK / MAX_ITER / NEW_COMBOS / NEW_ITERS / NEW_FLOP_BP / NEW_SBWIDE /
- *   NEW_BLUEPRINT / NEW_SOLVER / NEW_EXPLOIT / NEW_BP_RANGES 见下面各自定义
+ *   NEW_BLUEPRINT / NEW_BP_RANGES / NEW_BPGATE / NEW_PF_EXPLOIT / NEW_SOLVER / NEW_EXPLOIT 见下面各自定义
  *
  * 老版本源码目录**写死**在 import 里（`../../德州扑克_old`），换目录要改 import；
  * 不存在 `OLD_DIR` 环境变量，也不存在 `NEW_EXP`（要反向对照用 `NEW_CHALLENGE=0`）。
@@ -48,6 +48,13 @@ const NEW_BLUEPRINT = process.env.NEW_BLUEPRINT !== '0';
 const NEW_SOLVER = process.env.NEW_SOLVER !== '0';
 const NEW_EXPLOIT = process.env.NEW_EXPLOIT !== '0';
 const NEW_BP_RANGES = process.env.NEW_BP_RANGES !== '0';
+/** NEW_BPGATE=0：关掉翻前蓝图的深度闸门（任何有效筹码都用蓝图，复现 v0.25 行为）。 */
+const NEW_BP_GATE = process.env.NEW_BPGATE !== '0';
+/** NEW_PF_EXPLOIT=0：关掉「翻前剥削二期」（把对手统计接进蓝图策略分布）。 */
+const NEW_PF_EXPLOIT = process.env.NEW_PF_EXPLOIT !== '0';
+/** 剥削二期触发面计数（只做统计，不影响决策）。 */
+let preflopDecisions = 0;
+let preflopExploitHits = 0;
 /**
  * ARCH=fixed（默认）钉死宗师原型 = 0，与历史数字可比；
  * ARCH=assign 用 `assignChallengeArchetypes(seed, 座位 id)` 分配（与 `stateMachine.ts` 同源）。
@@ -110,10 +117,17 @@ async function play(seed: string, newSeat: number): Promise<number> {
       options.sbWide = NEW_SBWIDE;
       options.blueprint = NEW_BLUEPRINT;
       options.blueprintRanges = NEW_BP_RANGES;
+      options.blueprintStackGate = NEW_BP_GATE;
+      options.preflopExploitModel = NEW_PF_EXPLOIT;
       options.exploit = NEW_EXPLOIT;
       if (!NEW_SOLVER) options.turnRiver = { ...(options.turnRiver ?? {}), enabled: false };
     }
     const decision = await (side.decide as typeof decideNew)(view as never, 'expert', options);
+    // 剥削二期的触发面：翻前决策里有几次真的被对手读人改过（reasoning 带「读人：」）。
+    if (isNew && view.street === 'preflop') {
+      preflopDecisions += 1;
+      if (decision.debug.reasoning.includes('读人：')) preflopExploitHits += 1;
+    }
     const action: PlayerAction = decision.action;
     table = act(table, idx, action);
   }
@@ -170,12 +184,13 @@ const corr = cov / Math.max(1e-12, Math.sqrt(vx * vy));
 const bb = (v: number) => Number((v / 20 * 100).toFixed(1));
 console.log(JSON.stringify({
   newTier: (NEW_CHALLENGE ? '挑战宗师' : '专家') +
-    ` [sbWide=${NEW_SBWIDE} bp=${NEW_BLUEPRINT} solver=${NEW_SOLVER} exploit=${NEW_EXPLOIT} arch=${ARCH}]`,
+    ` [sbWide=${NEW_SBWIDE} bp=${NEW_BLUEPRINT} bpGate=${NEW_BP_GATE} pfExploit=${NEW_PF_EXPLOIT} solver=${NEW_SOLVER} exploit=${NEW_EXPLOIT} arch=${ARCH}]`,
   oldTier: OLD_CHALLENGE ? '挑战宗师' : '专家',
   seeds: H,
   games: n,
   bbPer100: bb(mean),
   ci95: [bb(mean - 1.96 * se), bb(mean + 1.96 * se)],
+  preflopExploit: { decisions: preflopDecisions, hits: preflopExploitHits },
   corrSameSeed: Number(corr.toFixed(4)),
   ci95Naive: [bb(flatMean - 1.96 * seNaive), bb(flatMean + 1.96 * seNaive)],
 }));

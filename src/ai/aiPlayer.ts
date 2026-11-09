@@ -69,7 +69,14 @@ import { gtoPushFoldAdvice } from './gtoAdvice';
 import { depthLimitedSearch, estimateActionEv } from './search';
 import { solveStreetSubgame } from './solver/subgame';
 import { solveTurnRiver } from './solver/subgameTurn';
-import { buildBlueprintRangeWeights, preflopActionOf, preflopAdvice } from './solver/preflop';
+import {
+  buildBlueprintRangeWeights,
+  preflopActionOf,
+  preflopAdvice,
+  preflopBlueprintInRange,
+} from './solver/preflop';
+import { PREFLOP_BUCKETS } from './solver/abstraction';
+import { exploitPreflopStrategy } from './preflopExploit';
 import { rangeFromWeight, type Range } from './solver/ranges';
 
 import './solver/blueprint';
@@ -192,6 +199,19 @@ export interface AIDecisionOptions {
   blueprint?: boolean;
   /** 单挑 SB 是否也用蓝图（基准消融用；默认 true）。 */
   blueprintSb?: boolean;
+  /**
+   * 是否按有效筹码深度闸门过滤蓝图（消融用；默认 true）。
+   *
+   * 蓝图按 50BB 求解，深度偏离太多时里面的跟注/全下频率会系统性错掉；
+   * 关掉后会像 v0.25 一样「任何深度都用蓝图」，短码时还会盖掉 push/fold 建议。
+   */
+  blueprintStackGate?: boolean;
+  /**
+   * 翻前剥削二期：是否把对手统计接进蓝图策略分布（消融用；默认 true）。
+   *
+   * 与 `preflopExploit`（旧的单点硬覆盖）分开，便于单独消融这一层。
+   */
+  preflopExploitModel?: boolean;
   /** 翻后是否用蓝图推出的范围（基准消融用；默认 true）。 */
   blueprintRanges?: boolean;
   /** 翻前是否按对手弃牌率做剥削（基准消融用；默认 true）。 */
@@ -1703,14 +1723,43 @@ async function decideCore(
     // ③最佳回应按 (SB桶, BB桶) 组合分别取 max，等于让回应方看穿对手手牌，
     //   可利用度永远算不出真值（卡在 3.3 BB/手）。
     // 修完后 SB 策略正常（弃 15% / 跛入 36% / 加注 48%），可以双边启用。
-    if (challenge && countOpponents(view) === 1 && options.blueprint !== false) {
+    //
+    // 深度闸门：蓝图只按 50BB 求解，且它会**盖掉上面 decidePreflop 里已经返回的
+    // push/fold 建议**（那个分支在 15BB 时才是对的）。所以有效筹码偏离训练深度
+    // 太多时直接跳过蓝图，让短码表 / 启发式接管。
+    const blueprintStackOk =
+      options.blueprintStackGate === false || preflopBlueprintInRange(view);
+    if (
+      challenge &&
+      countOpponents(view) === 1 &&
+      options.blueprint !== false &&
+      blueprintStackOk
+    ) {
       const advice = preflopAdvice(view);
       const sbAllowed = options.blueprintSb !== false;
       if (advice && advice.strategy.length > 0 && sbAllowed) {
+        // 剥削二期：把对手读人接进**策略分布**再采样（只重分配、有界、
+        // 平衡态与低置信度一律不动；细节与阈值见 `preflopExploit.ts`）。
+        let strategy = advice.strategy;
+        let exploitNote = '';
+        if (options.preflopExploit !== false && options.preflopExploitModel !== false) {
+          const adjusted = exploitPreflopStrategy({
+            node: advice.node,
+            actions: advice.actions,
+            strategy: advice.strategy,
+            handPercentile: (advice.bucket + 0.5) / PREFLOP_BUCKETS,
+            read: {
+              foldToBet: ctx.opponents.avgFoldToBet,
+              confidence: ctx.opponents.confidence,
+            },
+          });
+          strategy = adjusted.strategy;
+          exploitNote = adjusted.reason;
+        }
         let roll = rng();
         let pick = 0;
-        for (let index = 0; index < advice.strategy.length; index++) {
-          roll -= advice.strategy[index];
+        for (let index = 0; index < strategy.length; index++) {
+          roll -= strategy[index];
           if (roll <= 0) {
             pick = index;
             break;
@@ -1723,7 +1772,8 @@ async function decideCore(
           decisionSource = 'preflop-blueprint';
           reasoning =
             `挑战（翻前 CFR+ 蓝图）：${advice.node} 桶 ${advice.bucket}，` +
-            `${sampled.action} ${((advice.strategy[pick] ?? 0) * 100).toFixed(0)}%。` +
+            `${sampled.action} ${((strategy[pick] ?? 0) * 100).toFixed(0)}%。` +
+            (exploitNote ? ` ${exploitNote}` : '') +
             reasoning;
         }
       }

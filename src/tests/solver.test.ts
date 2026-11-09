@@ -3,11 +3,19 @@ import { solveMatrixGame } from '../ai/solver/cfr';
 import { solveStreetSubgame } from '../ai/solver/subgame';
 import { solveTurnRiver } from '../ai/solver/subgameTurn';
 import { buildStreetRanges, preflopRangeFor, rangeFromWeight } from '../ai/solver/ranges';
-import { preflopAdvice, solvePreflopBlueprint } from '../ai/solver/preflop';
+import {
+  effectiveStackBB,
+  preflopAdvice,
+  preflopNodeForView,
+  solvePreflopBlueprint,
+} from '../ai/solver/preflop';
+import { evaluatePreflopBlueprint } from '../ai/solver/blueprintEval';
+import { PREFLOP_BLUEPRINT } from '../ai/solver/blueprint';
 import { PREFLOP_BUCKETS, preflopBucketTable } from '../ai/solver/abstraction';
 import { flopSpotMatches } from '../ai/solver/flopBlueprint';
 import { turnValueFeaturesOf, TURN_VALUE_FEATURES } from '../ai/solver/turnValue';
 import type { Card } from '../game/types';
+import { DEFAULT_CONFIG } from '../game/types';
 import { buildPlayerView } from '../game/playerView';
 import { decide } from '../ai/aiPlayer';
 import { CC, makeHand, playSequence, playToStreet } from './helpers';
@@ -303,6 +311,145 @@ describe('翻前蓝图：三个历史 bug 的回归锁', () => {
       limp += (entry.strategy[limpIndex] ?? 0) * weight;
     }
     expect(limp / Math.max(1, mass)).toBeLessThan(0.6);
+  });
+});
+
+describe('翻前节点映射：全下不是 3-bet（P0 回归锁）', () => {
+  /** SB 开池到 openBB，BB 用 allin / 3-bet 回应，返回 SB 的视图。 */
+  function sbFacing(second: { type: 'allin' } | { type: 'raise'; amount: number }, openBB: number) {
+    const hand = makeHand({
+      stacks: [1000, 1000],
+      buttonIndex: 0,
+      seed: 'bp-map',
+      holeCards: [CC('As Kd'), CC('Qh Jh')],
+    });
+    const played = playSequence(hand, [
+      [0, { type: 'raise', amount: openBB * 20 }],
+      [1, second],
+    ]);
+    return buildPlayerView(played, 0, 'bp-map');
+  }
+
+  it('BB 全下 → sb_vs_allin_*；BB 再加注 → sb_vs_3bet_*', () => {
+    // 旧实现只数「加注次数」，把全下也算成一次加注，于是 SB 面对 50BB 全下
+    // 拿到的是 sb_vs_3bet_*（按 7.5BB 3-bet 解出来的防守范围，弃 53.7%）。
+    expect(preflopNodeForView(sbFacing({ type: 'allin' }, 2.5))).toEqual({
+      node: 'sb_vs_allin_2.5',
+      player: 'sb',
+    });
+    expect(preflopNodeForView(sbFacing({ type: 'raise', amount: 150 }, 2.5))).toEqual({
+      node: 'sb_vs_3bet_2.5',
+      player: 'sb',
+    });
+  });
+
+  it('3.5BB 开池后的全下走 3.5 那一套节点', () => {
+    expect(preflopNodeForView(sbFacing({ type: 'allin' }, 3.5))).toEqual({
+      node: 'sb_vs_allin_3.5',
+      player: 'sb',
+    });
+  });
+
+  it('面对全下拿到的动作集是 fold / call（没有再加注）', () => {
+    const advice = preflopAdvice(sbFacing({ type: 'allin' }, 2.5));
+    expect(advice).not.toBeNull();
+    expect(advice!.node).toBe('sb_vs_allin_2.5');
+    expect(advice!.actions).toEqual(['fold', 'call']);
+  });
+});
+
+describe('翻前蓝图离线验收（v0.26 按实战桌深重训）', () => {
+  it('训练深度等于实战桌深：1000 筹码 / 20 大盲 = 50BB', () => {
+    // 旧产物按 100BB 训练，而每手都以 50BB 开局（createTable 的 startingStack）。
+    // all-in 分支是唯一对深度敏感的地方，深度错了策略就等于按 2 倍筹码算出来的。
+    const realStackBB = DEFAULT_CONFIG.startingStack / DEFAULT_CONFIG.bigBlind;
+    expect(PREFLOP_BLUEPRINT.stackBB).toBe(realStackBB);
+  });
+
+  it('抽象只含运行时真能执行的动作：3-bet 用最小加注', () => {
+    // preflopActionOf 把 raise_big 折算成 3.5BB，实际执行就是 open+1BB 的最小加注。
+    // 树里按 open×3 解出来的 3-bet 防守范围，运行时根本用不上。
+    expect(PREFLOP_BLUEPRINT.threeBet ?? 'x3').toBe('min');
+  });
+
+  it('离线验收器与求解器等价（同一份蓝图，两条实现算出的可利用度一致）', () => {
+    // 这条锁住 blueprintEval.ts 与 preflop.ts 的叶节点估值/最佳回应没有漂移。
+    // 一旦有人只改一边，这里会立刻红。
+    const fresh = solvePreflopBlueprint({ iterations: 800, allowLimp: false });
+    const audited = evaluatePreflopBlueprint(fresh, {
+      stackBB: fresh.stackBB,
+      threeBet: fresh.threeBet,
+    });
+    expect(audited.exploitability).toBeCloseTo(fresh.exploitability, 3);
+  });
+
+  it('仓库里的蓝图在运行时口径下可利用度 ≤ 0.05 BB/手', () => {
+    // 旧产物在同深度的抽象里是 1.15 BB/手（按 100BB 训、放到 50BB 打）。
+    const result = evaluatePreflopBlueprint(PREFLOP_BLUEPRINT, {
+      stackBB: PREFLOP_BLUEPRINT.stackBB,
+      threeBet: 'min',
+      jamMapping: 'correct',
+    });
+    expect(result.exploitability).toBeLessThan(0.05);
+  });
+});
+
+describe('翻前节点映射：开池全下走专节点（B）', () => {
+  it('SB 开池即全下 → bb_vs_allin，而不是按 3.5BB 开池解的 bb_vs_open_3.5', () => {
+    // 旧映射只看「第一个加注的尺度」：50BB 全下 > 3BB，于是落进 bb_vs_open_3.5，
+    // 那是弃 40.5% / 跟 44.7% 的开池防守范围，拿去接 50BB 全下明显太松。
+    const hand = playSequence(
+      makeHand({ stacks: [1000, 1000], buttonIndex: 0, seed: 'bp-allin-open', holeCards: [undefined, CC('Qh Jh')] }),
+      [[0, { type: 'allin' }]],
+    );
+    const view = buildPlayerView(hand, 1, 'bp-allin-open');
+    expect(preflopNodeForView(view)).toEqual({ node: 'bb_vs_allin', player: 'bb' });
+    const advice = preflopAdvice(view);
+    expect(advice).not.toBeNull();
+    expect(advice!.actions).toEqual(['fold', 'call']);
+  });
+});
+
+describe('翻前蓝图深度闸门（A）', () => {
+  async function engineAt(stacks: number, gate = true): Promise<string> {
+    const hand = makeHand({
+      stacks: [stacks, stacks],
+      buttonIndex: 0,
+      seed: 'bp-gate',
+      holeCards: [CC('As Kd'), CC('Qh Jh')],
+    });
+    const index = hand.actingIndex!;
+    const view = buildPlayerView(hand, index, 'bp-gate');
+    const decision = await decide(view, 'expert', {
+      challenge: true,
+      maxIterations: 200,
+      blueprintStackGate: gate,
+    });
+    return decision.debug.engine ?? 'unknown';
+  }
+
+  it('有效筹码换算：1000 筹码 / 20 大盲 = 50BB', () => {
+    const hand = makeHand({ stacks: [1000, 1000], buttonIndex: 0, seed: 'bp-eff' });
+    const view = buildPlayerView(hand, 0, 'bp-eff');
+    expect(effectiveStackBB(view)).toBeCloseTo(50, 6);
+  });
+
+  it('40BB 在闸门内：走蓝图', async () => {
+    expect(await engineAt(800)).toBe('preflop-blueprint');
+  });
+
+  it('20BB 在闸门外：不走蓝图（push/fold 表或启发式接管）', async () => {
+    // 蓝图按 50BB 求解，短码还去套它会盖掉 decidePreflop 里已经返回的
+    // gtoPushFoldAdvice——那才是 15~20BB 下正确的策略。
+    expect(await engineAt(400)).not.toBe('preflop-blueprint');
+  });
+
+  it('80BB 在闸门外：不走蓝图', async () => {
+    expect(await engineAt(1600)).not.toBe('preflop-blueprint');
+  });
+
+  it('blueprintStackGate=false 时闸门失效（消融可复现 v0.25 行为）', async () => {
+    expect(await engineAt(400, false)).toBe('preflop-blueprint');
   });
 });
 

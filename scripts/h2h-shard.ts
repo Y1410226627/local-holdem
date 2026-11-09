@@ -49,6 +49,13 @@ const NEW_BLUEPRINT = process.env.NEW_BLUEPRINT !== '0';
 const NEW_SOLVER = process.env.NEW_SOLVER !== '0';
 const NEW_EXPLOIT = process.env.NEW_EXPLOIT !== '0';
 const NEW_BP_RANGES = process.env.NEW_BP_RANGES !== '0';
+/** NEW_BPGATE=0：关掉翻前蓝图的深度闸门（任何有效筹码都用蓝图，复现 v0.25 行为）。 */
+const NEW_BP_GATE = process.env.NEW_BPGATE !== '0';
+/** NEW_PF_EXPLOIT=0：关掉「翻前剥削二期」（把对手统计接进蓝图策略分布）。 */
+const NEW_PF_EXPLOIT = process.env.NEW_PF_EXPLOIT !== '0';
+/** 剥削二期触发面计数（只做统计，不影响决策）。 */
+let preflopDecisions = 0;
+let preflopExploitHits = 0;
 const MAX_ITER = Number(process.env.MAX_ITER ?? 0);
 /**
  * ARCH=fixed（默认）钉死宗师原型 = 0，与历史数字可比；
@@ -107,12 +114,19 @@ async function play(seed: string, newSeat: number): Promise<number> {
       options.sbWide = NEW_SBWIDE;
       options.blueprint = NEW_BLUEPRINT;
       options.blueprintRanges = NEW_BP_RANGES;
+      options.blueprintStackGate = NEW_BP_GATE;
+      options.preflopExploitModel = NEW_PF_EXPLOIT;
       options.exploit = NEW_EXPLOIT;
       if (!NEW_SOLVER) options.turnRiver = { ...(options.turnRiver ?? {}), enabled: false };
       // NEW_FLOP=0：消融关闭挑战档翻牌层（对照实验用）。
       if (process.env.NEW_FLOP === '0') options.flopLayer = false;
     }
     const decision = await (side.decide as typeof decideNew)(view as never, 'expert', options);
+    // 剥削二期的触发面：翻前决策里有几次真的被对手读人改过（reasoning 带「读人：」）。
+    if (isNew && view.street === 'preflop') {
+      preflopDecisions += 1;
+      if (decision.debug.reasoning.includes('读人：')) preflopExploitHits += 1;
+    }
     const action: PlayerAction = decision.action;
     table = act(table, idx, action);
   }
@@ -144,11 +158,12 @@ const bb = (v: number) => Number((v / 20 * 100).toFixed(1));
 console.log(JSON.stringify({
   shard: { handStart: HAND_START, hands: HANDS, out: OUT || null },
   newTier: (NEW_CHALLENGE ? '挑战宗师' : '专家') +
-    ` [sbWide=${NEW_SBWIDE} bp=${NEW_BLUEPRINT} solver=${NEW_SOLVER} exploit=${NEW_EXPLOIT} arch=${ARCH}]`,
+    ` [sbWide=${NEW_SBWIDE} bp=${NEW_BLUEPRINT} bpGate=${NEW_BP_GATE} pfExploit=${NEW_PF_EXPLOIT} solver=${NEW_SOLVER} exploit=${NEW_EXPLOIT} arch=${ARCH}]`,
   oldTier: OLD_CHALLENGE ? '挑战宗师' : '专家',
   hands: n,
   bbPer100: bb(mean),
   ci95: [bb(mean - 1.96 * se), bb(mean + 1.96 * se)],
+  preflopExploit: { decisions: preflopDecisions, hits: preflopExploitHits },
   sdChips: Number(Math.sqrt(varr).toFixed(2)),
   sdBB: Number((Math.sqrt(varr) / 20).toFixed(3)),
 }));

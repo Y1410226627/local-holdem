@@ -61,16 +61,52 @@ export interface PreflopBlueprint {
   stackBB: number;
   buckets: number;
   iterations: number;
-  /** 抽象游戏内的最佳回应可利用度（BB/手）。 */
+  /**
+   * 抽象游戏内的最佳回应可利用度（BB/手）。
+   *
+   * **以 `scripts/audit-preflop-blueprint.ts` 重算的结果为准。**
+   * 这个字段是训练时写下的，代码一改它就过期（v0.25 那份产物写 0.0167，
+   * 同策略用当时最新代码重算是 0.0470）。验收脚本会重算并与它比对，
+   * 差得太多就直接报「产物与代码不一致，请重新生成」。
+   */
   exploitability: number;
+  /** 训练时的 3-bet 几何（老产物没有这个字段，视为 `'x3'`）。 */
+  threeBet?: PreflopThreeBet;
+  /** 训练时是否允许跛入（老产物没有这个字段）。 */
+  allowLimp?: boolean;
   nodes: Record<string, { player: 'sb' | 'bb'; actions: PreflopActionName[] }>;
   entries: PreflopBlueprintEntry[];
 }
 
-const STACK_BB = 100;
+/**
+ * 默认有效筹码（BB）。
+ *
+ * 必须和实战桌况一致：`DEFAULT_CONFIG` 是 1000 筹码 / 20 大盲 = **50BB**，
+ * 测量台 `head2head.ts` / `hlb-bots.ts` 也是 STACK=1000，每手都以 50BB 开局。
+ * 旧值 100 让整棵树的 all-in 分支（唯一对深度敏感的地方）建在 2 倍深度上：
+ * 把「按 100BB 训出来的策略」放进 50BB 的同一抽象里评估，可利用度是
+ * **1.15 BB/手**；按 50BB 重训（20 万次迭代）后是 **0.005 BB/手**，
+ * 同一棵树、同一套动作、同一个评估器，可直接比。
+ */
+const STACK_BB = 50;
 const SMALL_RAISE = 2.5;
 const BIG_RAISE = 3.5;
-const THREE_BET_MULT = 3;
+/**
+ * 3-bet 尺度口径。
+ *
+ * - `'min'`（默认）：和运行时**实际能执行**的动作一致。`preflopActionOf` 把
+ *   `raise_big` 一律折算成 3.5BB，而面对 2.5BB 开池时最小加注正好是 3.5BB、
+ *   面对 3.5BB 开池时会被 `Math.max(legal.minRaiseTo, …)` 抬到 4.5BB——
+ *   两种情况都等于 **open + 1BB**，也就是一个最小加注。
+ * - `'x3'`：抽象原样（open × 3 = 7.5 / 10.5BB）。运行时做不到这个尺度，
+ *   所以只保留给对照诊断用。
+ *
+ * 抽象必须只包含「真的能执行」的动作（Libratus 的抽象也是这么定的）：
+ * 树里按 3× 求出来的 3-bet 防守范围，运行时却用最小加注打出去，
+ * 等于拿「面对 7.5BB 3-bet」的弃牌率去应对一个 3.5BB 的加注。
+ */
+export type PreflopThreeBet = 'min' | 'x3';
+const THREE_BET_MODE: PreflopThreeBet = 'min';
 const LIMP_RAISE = 3;
 /** SB 跛入后的总投入（0.5 盲注 + 0.5 补齐）。跛入后再弃牌亏的是这个数，不是 0.5。 */
 const LIMP_INVEST = 1;
@@ -87,13 +123,20 @@ function terminalShowdown(pot: number, investSb: number, remaining: number, alli
  * 构造翻前抽象树。收益统一以 BB 为单位，从 SB 视角计算。
  * 所有 raise 都是「加到」的总额；call 的投入由路径决定。
  */
-export function buildPreflopTree(stackBB = STACK_BB, allowLimp = true): PreflopNode {
+export function buildPreflopTree(
+  stackBB = STACK_BB,
+  allowLimp = true,
+  threeBet: PreflopThreeBet = THREE_BET_MODE,
+): PreflopNode {
   const S = Math.max(2, stackBB);
   const raiseSmall = Math.min(S, SMALL_RAISE);
   const raiseBig = Math.min(S, BIG_RAISE);
+  /** 3-bet 加到多少：最小加注（运行时实际）或 open×3（旧抽象）。 */
+  const threeBetTo = (open: number): number =>
+    Math.min(S, threeBet === 'min' ? open + 1 : open * 3);
 
   const sbVs3Bet = (open: number): PreflopNode => {
-    const threeBet = Math.min(S, open * THREE_BET_MULT);
+    const threeBet = threeBetTo(open);
     const potIfCall = threeBet * 2;
     return {
       id: `sb_vs_3bet_${open}`,
@@ -117,7 +160,6 @@ export function buildPreflopTree(stackBB = STACK_BB, allowLimp = true): PreflopN
   };
 
   const bbVsOpen = (open: number): PreflopNode => {
-    const threeBet = Math.min(S, open * THREE_BET_MULT);
     return {
       id: `bb_vs_open_${open}`,
       player: 'bb',
@@ -183,6 +225,26 @@ export function buildPreflopTree(stackBB = STACK_BB, allowLimp = true): PreflopN
     ],
   };
 
+  /**
+   * BB 面对「开池即全下」。
+   *
+   * 旧树里 SB 从根节点只能 fold / 开池，所以「对手开池全下」这种局面没有节点，
+   * `preflopNodeForView` 只能把它按开池尺度塞进 `bb_vs_open_3.5`——那是按
+   * 3.5BB 开池解出来的防守范围（弃 40.5% / 跟 44.7%），拿它去接 50BB 全下
+   * 明显太松（同深度的 `sb_vs_allin` 是弃 86.6%）。
+   *
+   * 加一个专节点后，SB 也顺带学会了「能不能开池全下」；如果均衡给出病态的
+   * 大比例开池全下，说明是翻后模型太粗把全下美化过头了，应改回「该场合不用蓝图」。
+   */
+  const bbVsAllin: PreflopNode = {
+    id: 'bb_vs_allin',
+    player: 'bb',
+    actions: [
+      { name: 'fold', next: terminalFold(1) },
+      { name: 'call', next: terminalShowdown(2 * S, S, 0, true) },
+    ],
+  };
+
   return {
     id: 'sb_root',
     player: 'sb',
@@ -193,6 +255,7 @@ export function buildPreflopTree(stackBB = STACK_BB, allowLimp = true): PreflopN
       ...(allowLimp ? [{ name: 'call' as const, next: bbVsLimp }] : []),
       { name: 'raise_small', next: bbVsOpen(raiseSmall) },
       { name: 'raise_big', next: bbVsOpen(raiseBig) },
+      { name: 'allin', next: bbVsAllin },
     ],
   };
 }
@@ -265,25 +328,44 @@ export function buildBucketEquityMatrix(samplesPerPair = 240): number[][] {
  *
  * 份额用归一化形式保证零和：SB 拿 share、BB 拿 1−share，两者之和恒等于底池。
  */
-const DEFAULT_REALIZATION_IP = 1.05;
-const DEFAULT_REALIZATION_OOP = 0.95;
+/**
+ * 权益实现率默认值，导出给离线验收（`blueprintEval.ts`）复用，
+ * 避免评估器和求解器各写一份常量、悄悄漂移。
+ */
+export const DEFAULT_REALIZATION_IP = 1.05;
+export const DEFAULT_REALIZATION_OOP = 0.95;
 
 let realizationIp = DEFAULT_REALIZATION_IP;
 let realizationOop = DEFAULT_REALIZATION_OOP;
 
-function realizationFactor(remaining: number, pot: number, inPosition: boolean): number {
+function realizationFactor(
+  remaining: number,
+  pot: number,
+  inPosition: boolean,
+  ip = realizationIp,
+  oop = realizationOop,
+): number {
   const spr = pot > 0 ? remaining / pot : 0;
   const positionalWeight = Math.min(1, spr / 4);
-  const base = inPosition ? realizationIp : realizationOop;
+  const base = inPosition ? ip : oop;
   return 1 + (base - 1) * positionalWeight;
 }
 
-function terminalEv(terminal: PreflopTerminal, equity: number): number {
+/**
+ * 叶节点估值。导出是为了让离线验收（`blueprintEval.ts`）用**同一份**模型重算，
+ * 而不是各写一份常量悄悄漂移。默认取求解器当前的实现率。
+ */
+export function preflopTerminalEv(
+  terminal: PreflopTerminal,
+  equity: number,
+  ip = realizationIp,
+  oop = realizationOop,
+): number {
   if (terminal.kind === 'fold') return terminal.payoffSb;
   // 全下：没有后续街，直接按原始胜率结算。
   if (terminal.allin || terminal.remaining <= 0) return equity * terminal.pot - terminal.investSb;
-  const sbFactor = realizationFactor(terminal.remaining, terminal.pot, true);
-  const bbFactor = realizationFactor(terminal.remaining, terminal.pot, false);
+  const sbFactor = realizationFactor(terminal.remaining, terminal.pot, true, ip, oop);
+  const bbFactor = realizationFactor(terminal.remaining, terminal.pot, false, ip, oop);
   const sbWeight = Math.max(1e-9, equity * sbFactor);
   const bbWeight = Math.max(1e-9, (1 - equity) * bbFactor);
   const share = sbWeight / (sbWeight + bbWeight);
@@ -292,7 +374,7 @@ function terminalEv(terminal: PreflopTerminal, equity: number): number {
 
 /**
  * 用 CFR+ 求解翻前抽象游戏。
- * 每个桶一个信息集；对 10×10 个桶对做全枚举 CFR（chance 节点均匀）。
+ * 每个桶一个信息集；对 N×N 个桶对做全枚举 CFR（chance 节点均匀）。
  */
 export function solvePreflopBlueprint(
   options: {
@@ -304,13 +386,17 @@ export function solvePreflopBlueprint(
     realizationOop?: number;
     /** SB 是否允许跛入（默认 true；关掉后 SB 只能加注或弃牌）。 */
     allowLimp?: boolean;
+    /** 3-bet 几何（默认 'min'，= 运行时实际能执行的最小加注）。 */
+    threeBet?: PreflopThreeBet;
   } = {},
 ): PreflopBlueprint {
   const iterations = Math.max(100, Math.floor(options.iterations ?? 6000));
   const stackBB = options.stackBB ?? STACK_BB;
+  const allowLimp = options.allowLimp ?? true;
+  const threeBet = options.threeBet ?? THREE_BET_MODE;
   realizationIp = options.realizationIp ?? DEFAULT_REALIZATION_IP;
   realizationOop = options.realizationOop ?? DEFAULT_REALIZATION_OOP;
-  const tree = buildPreflopTree(stackBB, options.allowLimp ?? true);
+  const tree = buildPreflopTree(stackBB, allowLimp, threeBet);
   const equityMatrix = buildBucketEquityMatrix();
   const infos = new Map<string, InfoSet>();
   const nodeSpec: Record<string, { player: 'sb' | 'bb'; actions: PreflopActionName[] }> = {};
@@ -343,7 +429,7 @@ export function solvePreflopBlueprint(
     iteration: number,
   ): number => {
     if (!('player' in node)) {
-      return terminalEv(node, equityMatrix[sbBucket][bbBucket]);
+      return preflopTerminalEv(node, equityMatrix[sbBucket][bbBucket]);
     }
     const bucket = node.player === 'sb' ? sbBucket : bbBucket;
     const info = getInfo(node.player, node, bucket);
@@ -415,7 +501,7 @@ export function solvePreflopBlueprint(
         if (weight <= 0) continue;
         const sbBucket = brPlayer === 'sb' ? brBucket : other;
         const bbBucket = brPlayer === 'bb' ? brBucket : other;
-        total += weight * terminalEv(node, equityMatrix[sbBucket][bbBucket]);
+        total += weight * preflopTerminalEv(node, equityMatrix[sbBucket][bbBucket]);
       }
       return total;
     }
@@ -466,7 +552,7 @@ export function solvePreflopBlueprint(
     sbBucket: number,
     bbBucket: number,
   ): number => {
-    if (!('player' in node)) return terminalEv(node, equityMatrix[sbBucket][bbBucket]);
+    if (!('player' in node)) return preflopTerminalEv(node, equityMatrix[sbBucket][bbBucket]);
     const bucket = node.player === 'sb' ? sbBucket : bbBucket;
     const strategy =
       average.get(buildInfoKey(node.player, node.id, bucket)) ??
@@ -504,11 +590,16 @@ export function solvePreflopBlueprint(
 
   return {
     generatedAt: new Date().toISOString(),
-    description: `单挑翻前 CFR+ 蓝图（${PREFLOP_BUCKETS} 个真实胜率桶，${iterations} 次迭代）`,
+    description:
+      `单挑翻前 CFR+ 蓝图（${PREFLOP_BUCKETS} 个真实胜率桶，${iterations} 次迭代，` +
+      `${stackBB}BB，3-bet=${threeBet}，跛入=${allowLimp ? '开' : '关'}）。` +
+      `exploitability 为训练时自报值，验收以 scripts/audit-preflop-blueprint.ts 重算为准。`,
     stackBB,
     buckets: PREFLOP_BUCKETS,
     iterations,
     exploitability: Number(exploitability.toFixed(4)),
+    threeBet,
+    allowLimp,
     nodes: nodeSpec,
     entries,
   };
@@ -539,6 +630,44 @@ export function getPreflopBlueprint(): PreflopBlueprint | null {
   return blueprintCache;
 }
 
+/**
+ * 蓝图的可信深度区间（有效筹码 BB）。
+ *
+ * 蓝图是按**固定深度**（`STACK_BB` = 50BB）求解的：整棵树只有 all-in 分支对深度
+ * 敏感，而 15BB 和 50BB 下「全下要冒多少风险」差三倍多。所以深度一旦偏离，
+ * 表里的跟注/全下频率就系统性错掉。
+ *
+ * 依据：同一份 50BB 蓝图放进不同深度的同一套抽象里评估（`STACKS=... npx tsx
+ * scripts/audit-preflop-blueprint.ts`），得到失配可利用度
+ * 15BB 1.297 / 20BB 0.919 / 25BB 0.648 / 30BB 0.449 / 35BB 0.271 /
+ * **40BB 0.129 / 50BB 0.005 / 60BB 0.032 / 70BB 0.065** / 80BB 0.098 / 100BB 0.165。
+ *
+ * 判据用「蓝图自己在 BB 侧带来的边际收益」（配对消融 +16.5 BB/100 ≈ 0.165 BB/手）：
+ * - 下界 40BB：失配 0.129 仍小于这笔收益，到 35BB 就变成 0.271 反超 → 闸掉；
+ * - 上界 70BB：失配 0.065 小于收益的一半，80BB 起 0.098 就不划算了。
+ * 曲线左右不对称（短码侧陡得多），所以不用对称区间。
+ */
+export const BLUEPRINT_STACK_MIN_BB = 40;
+export const BLUEPRINT_STACK_MAX_BB = 70;
+
+/** 有效筹码（BB）= 双方剩余筹码+本手已投入 的较小者 / 大盲。 */
+export function effectiveStackBB(view: PlayerView): number {
+  const active = view.players.filter((p) => p.status === 'active' || p.status === 'allin');
+  if (active.length === 0) return 0;
+  const smallest = Math.min(...active.map((p) => p.stack + p.totalCommitted));
+  return smallest / Math.max(1, view.bigBlind);
+}
+
+/** 当前局面是否落在蓝图可信深度内（闸门关闭时调用方直接跳过这个判断）。 */
+export function preflopBlueprintInRange(
+  view: PlayerView,
+  minBB = BLUEPRINT_STACK_MIN_BB,
+  maxBB = BLUEPRINT_STACK_MAX_BB,
+): boolean {
+  const stackBB = effectiveStackBB(view);
+  return stackBB >= minBB && stackBB <= maxBB;
+}
+
 /** 把当前视图映射到翻前节点。 */
 export function preflopNodeForView(view: PlayerView): { node: string; player: 'sb' | 'bb' } | null {
   if (view.street !== 'preflop') return null;
@@ -559,12 +688,27 @@ export function preflopNodeForView(view: PlayerView): { node: string; player: 's
   const open = raiseTo <= 3 ? 'raise_small' : 'raise_big';
   if (raises.length === 1) {
     if (hasLimp && !isSb) return { node: 'bb_vs_limp', player: 'bb' };
-    return isSb ? null : { node: open === 'raise_small' ? 'bb_vs_open_2.5' : 'bb_vs_open_3.5', player: 'bb' };
+    if (isSb) return null;
+    // 开池即全下：有专节点，不能按开池尺度塞进 bb_vs_open_*。
+    if (firstRaise.action.type === 'allin') return { node: 'bb_vs_allin', player: 'bb' };
+    return { node: open === 'raise_small' ? 'bb_vs_open_2.5' : 'bb_vs_open_3.5', player: 'bb' };
   }
   if (raises.length === 2) {
-    return isSb
-      ? { node: open === 'raise_small' ? 'sb_vs_3bet_2.5' : 'sb_vs_3bet_3.5', player: 'sb' }
-      : null;
+    if (!isSb) return null;
+    const suffix = open === 'raise_small' ? '2.5' : '3.5';
+    /**
+     * 第二次加注如果是**全下**，这里必须给全下应对节点（fold / call），
+     * 不能给 3-bet 防守节点。
+     *
+     * 旧实现只数「加注次数」，把全下也算成一次普通加注，于是 SB 面对 50BB 全下时
+     * 拿到的是 `sb_vs_3bet_*`——那是按 7.5BB 的 3-bet 解出来的防守范围（弃 53.7%），
+     * 结果 AI 面对全下在跟注 46%，而 `sb_vs_allin_*` 里现成的策略是弃 88.7%。
+     * 离线量化：这一条让抽象内可利用度多出 +0.74 BB/手（老产物 +1.42）。
+     */
+    if (raises[1].action.type === 'allin') {
+      return { node: `sb_vs_allin_${suffix}`, player: 'sb' };
+    }
+    return { node: `sb_vs_3bet_${suffix}`, player: 'sb' };
   }
   return null;
 }
