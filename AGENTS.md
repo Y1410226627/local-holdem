@@ -34,7 +34,7 @@
   - 以 GTO 基准为原点：诈唬率按 α(bet) = bet/(pot+2bet) 随尺度缩放；跟注线从底池赔率出发；对「从不弃牌」的对手价值线压到 0.5（下注的盈亏平衡点）。
   - 采纳权重 `w = confidence × closeness`：样本不足（`confidence < 0.25`）完全退回基准；低难度（closeness 低）几乎不调整。
   - **跟注线只由攻击信号决定，不要用弃牌率**。初版加过 `+0.06 × foldSignal`，结果对跟注站把跟注线降了下来（他弃牌率低是因为爱跟、不爱下注），方向反了。
-  - `solverShouldYield()` 决定**是否跳过 CFR 求解器**（强读、置信度 ≥0.5 且信号极端时跳过；求解器假设对手按均衡打，对从不弃牌的对手均衡打法不是最优，实测转牌下注率 8% → 54%）；`hasStrongExploitRead()` 只管**剥削层开关**。两个判断不要混用（历史 bug：混用导致对正常对手也关求解器）。
+  - `solverShouldYield()` 决定**是否跳过 CFR 求解器**（强读、置信度 ≥0.5 且信号极端时跳过；求解器假设对手按均衡打，对从不弃牌或**低攻击/价值型**（攻击性 ≤0.8）的对手均衡打法不是最优——实测 HLB three-bet-caller 上求解器是多输 ~120 BB/100 的来源，v0.25.10 把门槛从 0.4 提到 0.8，专家档对手攻击性实测 ~2.6 不受影响）；`hasStrongExploitRead()` 只管**剥削层开关**。两个判断不要混用（历史 bug：混用导致对正常对手也关求解器）。
   - 翻前跛入门槛要按「会不会被再加注」分开：攻击性 ≥2.5 的对手门槛 0.65（加注后被反打要亏 3.2BB），单纯不弃牌的跟注站门槛 0.35（不会被反打）。用同一个门槛会让其中一边明显亏。
   - **统计口径前提**：`allin` 必须按「是否抬高下注额」计入 `raises` / `calls`。旧实现完全不计，导致每手全下的对手 `aggression = 0`（被当成最被动的人），上面所有针对激进对手的逻辑都会失效。
   - 只用公开统计（`OpponentSummary`）与公开动作，不得读对手底牌。
@@ -85,7 +85,7 @@ node scripts/setup.mjs --check          # 只检查环境（启动器内部使�
 | --- | --- | --- |
 | 安装依赖 | `npm install --no-audit --no-fund` | 生成 `node_modules/`，退出码 0 |
 | 类型检查 | `npx tsc --noEmit` | 无输出、退出码 0 |
-| 测试 | `npm test` | `37 passed` 测试文件、`498 passed` 用例 |
+| 测试 | `npm test` | `37 passed` 测试文件、`499 passed` 用例 |
 | 基准 | `npm run bench` | 输出各对手 BB/100 + 95% CI + solver 占比 |
 | 剥削审计 | `npm run audit:exploit` | 对 6 种固定对手做配对 A/B（剥削层开/关），输出绝对胜率 + 配对差值 + 95% CI |
 | 翻前蓝图 | `npm run gto:blueprint` | 输出可利用度（产物自报/audit 重算 **0.0054 BB/手** @200000 迭代） |
@@ -139,7 +139,7 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 6. **可复现种子**：引擎随机性由 `seed + handNo` 决定（`src/game/cards.ts`）；UI 默认每局随机种子（`src/ui/seed.ts`）。
 7. **体验随机**：风格/随机化只能小幅调整合法动作与参数，不得破坏难度档差异、不得读取隐藏信息；所有新增随机必须走种子派生流。真人化层（跨手统计 / 情绪 / 真人式失误）同样只能基于公开动作与自己的状态，不得利用隐藏信息。
 8. 不要改动启动脚本的编码/权限约定：`.bat` 为 **UTF-8 无 BOM + CRLF**；`.sh` / `.command` 为 **LF**，且 `.command` / `.sh` 在 git 索引中需要保留可执行位（`chmod +x` / `git update-index --chmod=+x`）。
-9. **版本号（每次提交必做）**：提交前同步递增 `package.json` 与 `package-lock.json` 的 `version`，并让版本号与本次改动在同一个提交里（当前 v0.25.9：修复 / 文档 / 微调递增补丁号，成块功能递增次版本）；提交信息带上版本号。详见 [README.md](README.md)「版本号约定」。
+9. **版本号（每次提交必做）**：提交前同步递增 `package.json` 与 `package-lock.json` 的 `version`，并让版本号与本次改动在同一个提交里（当前 v0.25.10：修复 / 文档 / 微调递增补丁号，成块功能递增次版本）；提交信息带上版本号。详见 [README.md](README.md)「版本号约定」。
 10. **手机 5/6 人桌布局（v0.22.0 起）**：四条不能回退的约束，改动前先用 `npm run shot:mobile` 出图对比：
     ①行牌提示条在手机端必须**随文档流**（不能 `position: fixed` 盖住工具栏与顶部座位）；
     ②中央 `.table-status` 在手机端**隐藏**——它和底部操作区完全重复，且正好压在左右座位上；
@@ -199,7 +199,7 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 | `src/game/` | 纯函数规则引擎（牌堆、牌型、下注、边池、状态机、受限视图、日志） |
 | `src/ai/` | 四档难度、范围模型、蒙特卡洛胜率、大模型机器人、训练参数；`data/` 为训练产物 |
 | `src/ui/` | React 界面（教程、大厅、牌桌、设置栏、调试面板、历史回放）；`mobile.ts` 为手机布局判定与安卓壳检测 |
-| `src/tests/` | Vitest 测试（37 个文件 / 498 个用例） |
+| `src/tests/` | Vitest 测试（37 个文件 / 499 个用例） |
 | `src/ai/style.ts` | 体验随机：机器人风格原型 / 下注尺度偏好 / 本地台词 / 变化率 |
 | `src/ai/humanModel.ts` | 真人化：跨手统计 / 情绪 / 对手利用 / 真人式失误 / fold-equity EV |
 | `src/ai/challenge.ts` | 挑战宗师：宗师原型 / 读计时与下注细节 / 计时伪装 / range 极化 / EV 尺度 |
@@ -229,18 +229,18 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 ## 验收清单（DoD）
 
 - [ ] `node scripts/setup.mjs --agent` 退出码 0，输出 `SETUP_RESULT=OK`
-- [ ] `npm test`：37 个测试文件、498 个用例全部通过
+- [ ] `npm test`：37 个测试文件、499 个用例全部通过
 - [ ] `npm run build`：生成 `dist/`，无 TypeScript 错误
 - [ ] `npm run dev -- --host 127.0.0.1 --port 5173 --strictPort` 可启动，HTTP 探测 200
 - [ ] 启动脚本冒烟（按平台）：Windows `启动德州扑克.bat --no-open` / macOS-Linux `bash 启动德州扑克.sh --no-open` 能起服务并返回 200
 - [ ] Node.js 检测语义：已有 Node 时启动器直接跳过安装；缺 Node + `--agent` 时 exit 1 且不安装（需要自动装时用 `--install-node`）
-- [ ] `package.json` 版本号已按约定递增（当前 v0.25.9），并与本次改动在同一个提交
+- [ ] `package.json` 版本号已按约定递增（当前 v0.25.10），并与本次改动在同一个提交
 - [ ] `npm run apk` 退出码 0 且输出 `APK_RESULT=OK`；`apk/` 内只有与 `package.json` 版本一致的 APK
 - [ ] （若本次改了前端）`npm run exe` 退出码 0；`release/Holdem-Setup-<version>.exe` 存在；用冒烟模式跑打包后的 `release/win-unpacked/德州扑克.exe` 输出 `SMOKE_OK`
 - [ ] APK 冒烟：`aapt2 dump badging` 的 versionName 与 `package.json` 一致、label 为「德州扑克」；`apksigner verify` 通过（release 签名）
 - [ ] 手机布局冒烟：390×844 / 360×640 / 844×390 下进行中牌桌与操作区一屏（无纵向滚动 / 横向溢出），桌面 1440×900 正常
 - [ ] 一键同步数据冒烟：`node scripts/sync-data.mjs --help` 退出码 0；`--list` 能识别同级旧版本目录
-- [ ] 挑战宗师冒烟：`npm test` 中 `challenge.test.ts` + `solver.test.ts` + `families.test.ts` 全绿；`npm run bench` 能输出配对 95% CI；当前挑战 vs 专家为 **+51.6 BB/100，配对 95% CI [26.6, 76.7]**（30,400 局，15,200 seed，当前代码 + `ARCH=assign`；历史 80,000 局口径 +6.3 [−8.9, +21.5] 是旧代码对照）；但同一版代码在 HLB `three-bet-caller` 上**配对差 −120.8 [−183.3, −58.2]（REGRESSION）**，**不得在文档/提交信息里宣称“人类无法战胜”或“无漏洞”**；难度选择「挑战宗师」后座位显示徽标、调试面板出现 `CFR+ 蓝图` / `challenge-multiway`（河牌单街求解默认启用），无 console 报错
+- [ ] 挑战宗师冒烟：`npm test` 中 `challenge.test.ts` + `solver.test.ts` + `families.test.ts` 全绿；`npm run bench` 能输出配对 95% CI；当前挑战 vs 专家为 **+51.6 BB/100，配对 95% CI [26.6, 76.7]**（30,400 局，15,200 seed，当前代码 + `ARCH=assign`；历史 80,000 局口径 +6.3 [−8.9, +21.5] 是旧代码对照）；v0.25.10 修复后 HLB `three-bet-caller` 配对差 **+39.8 [−19.6, +99.2]（OK，不再是 REGRESSION）**，但该 bot 只覆盖一类漏洞，**不得在文档/提交信息里宣称“人类无法战胜”或“无漏洞”**；难度选择「挑战宗师」后座位显示徽标、调试面板出现 `CFR+ 蓝图` / `challenge-multiway`（河牌单街求解默认启用），无 console 报错
 - [ ] 工作区没有 `node_modules/`、`dist/`、日志或临时脚本被误加入提交（`.gitignore` 已覆盖）
 
 ## 常见问题
