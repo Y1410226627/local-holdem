@@ -782,9 +782,14 @@ export function preflopActionOf(
  * 与对手实际会怎么打无关；这里换成「对手真的会这样打吗」。
  *
  * 只处理单挑；多人或没有蓝图时返回 null，调用方回退到旧模型。
+ *
+ * `includeViewer`：把**自己**也放进返回的 Map（默认 false，行为与旧版逐位相同）。
+ * 范围优势层需要「双方来自同一套信念」的对比：两侧若用不同估计器，
+ * edge 里会混进「模型宽度差」这个与牌面无关的系统偏差。
  */
 export function buildBlueprintRangeWeights(
   view: PlayerView,
+  options: { includeViewer?: boolean } = {},
 ): Map<number, RangeWeight> | null {
   const blueprint = blueprintCache;
   if (!blueprint) return null;
@@ -839,7 +844,7 @@ export function buildBlueprintRangeWeights(
 
   const out = new Map<number, RangeWeight>();
   for (const player of view.players) {
-    if (player.id === view.viewerId) continue;
+    if (player.id === view.viewerId && options.includeViewer !== true) continue;
     const seat: 'sb' | 'bb' = player.id === buttonId ? 'sb' : 'bb';
     const perBucket: number[] = [];
     for (let bucket = 0; bucket < PREFLOP_BUCKETS; bucket++) {

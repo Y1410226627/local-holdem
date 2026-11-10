@@ -38,6 +38,7 @@ import type { BoardTexture } from './flopTexture';
 import { readPotContext, threeBetCbetBonus } from './potContext';
 import type { PotContext } from './potContext';
 import { turnBarrelTendency, turnSizeFactor, turnTexture } from './turnTexture';
+import { RANGE_EDGE_THRESHOLD, rangeEdgeFromRanges, rangeEdgeSizeFactor } from './rangeEdge';
 
 /**
  * 对手在这条线上会不会弃牌？范围下注 / 二次开火都靠弃牌率赚钱，
@@ -187,6 +188,11 @@ export interface AIDecisionOptions {
   /** 消融对照用：传 false 关闭挑战档翻牌层（默认开）。 */
   flopLayer?: boolean;
   /**
+   * 消融对照用：传 false 关闭「范围优势层」（翻牌 / 转牌的 ±12% 尺度修正，默认开）。
+   * 只在挑战档生效；关掉后挑战档决策与接线前逐位相同。
+   */
+  rangeEdge?: boolean;
+  /**
    * 挑战模式（宗师 AI）：使用挑战档 profile + 宗师原型 + 读下注细节 / 思考时间。
    * 训练 / 对照评估时忽略（profileOverride 优先）。
    */
@@ -298,6 +304,8 @@ interface DecisionContext {
   exploitEnabled: boolean;
   /** 是否启用挑战档翻牌层（消融对照用；默认开）。 */
   flopLayer: boolean;
+  /** 是否启用挑战档范围优势层（消融对照用；默认开）。 */
+  rangeEdge: boolean;
   /** 挑战模式的宗师原型 id。 */
   archetypeId?: number;
   /** 当前手读到的对手思考时间（挑战模式）。 */
@@ -1002,6 +1010,61 @@ function multiStreetPlan(
   return '河牌放弃边缘牌';
 }
 
+/* ------------------------------------------------------------------ */
+/* 挑战档范围优势层：范围来源 + edge                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 范围优势层用的双方范围：**同一套**翻前蓝图信念（与挑战档算 equity 用的是同一份）。
+ *
+ * 为什么不自己造范围：
+ *   1. 成本。`buildRangeForPlayer` 实测 0.56ms（本机翻牌视图），而蓝图 0.03ms；
+ *      这一层每次决策都会算一次 edge（算完才知道要不要触发），必须便宜。
+ *   2. 口径。蓝图给的是「对手走这条线时各手牌的相对概率」；hero / villain 两侧同源，
+ *      edge 才只反映牌面契合度。一侧蓝图、一侧 `buildRangeForPlayer`，
+ *      差值里会混进两个模型的宽度差——那是个与牌面无关的系统偏差。
+ *
+ * 缓存键含 seed / 街 / 牌面 / 完整动作摘要：（同一手内重复决策直接命中；
+ * 不同手牌只要 seed 或动作线不同就是另一个键，不会串味）。蓝图权重函数只读，可共享。
+ */
+const blueprintBeliefCache = new Map<string, Map<number, RangeWeight> | null>();
+
+function blueprintBeliefRanges(view: PlayerView): Map<number, RangeWeight> | null {
+  const boardKey = view.board.map((card) => `${card.rank}${card.suit}`).join('');
+  const actionKey = view.actions
+    .map((record) => `${record.street[0]}${record.actorId}${record.action.type[0]}${record.toAmount ?? 0}`)
+    .join(',');
+  const key = `${view.seed}|${view.street}|${boardKey}|${actionKey}`;
+  const cached = blueprintBeliefCache.get(key);
+  if (cached !== undefined) return cached;
+  const built = buildBlueprintRangeWeights(view, { includeViewer: true });
+  if (blueprintBeliefCache.size >= 48) {
+    const oldest = blueprintBeliefCache.keys().next().value;
+    if (oldest !== undefined) blueprintBeliefCache.delete(oldest);
+  }
+  blueprintBeliefCache.set(key, built);
+  return built;
+}
+
+/**
+ * 当前局面的范围优势 edge（-1..1）。
+ * 拿不到蓝图（多人桌 / 无翻前动作 / 蓝图缺失）→ 0（中性），不抛错、不猜。
+ */
+function rangeEdgeFor(ctx: DecisionContext): number {
+  const { view } = ctx;
+  const ranges = blueprintBeliefRanges(view);
+  if (!ranges) return 0;
+  let hero: RangeWeight | null = null;
+  let villain: RangeWeight | null = null;
+  for (const [playerId, weight] of ranges) {
+    if (playerId === view.viewerId) hero = weight;
+    else if (!villain) villain = weight;
+  }
+  if (!hero || !villain) return 0;
+  // 自己的底牌从**对手**范围里排除（见 rangeEdgeFromRanges 的注释）。
+  return rangeEdgeFromRanges(view.board, hero, villain, view.self.holeCards);
+}
+
 function decideExpertPostflop(
   ctx: DecisionContext,
   analysis: PostflopAnalysis,
@@ -1033,6 +1096,8 @@ function decideExpertPostflop(
 
   let action: PlayerAction;
   let note: string;
+  /** 范围优势层触发时的说明（未触发为空串，保证关层时 reasoning 逐位不变）。 */
+  let rangeEdgeNote = '';
 
   if (legal.canCheck) {
     // 挑战档翻牌层：牌面纹理修正尺度（干燥面缩小、湿润面放大）。
@@ -1046,11 +1111,25 @@ function decideExpertPostflop(
     // 曾把同一逻辑延伸到河牌，实测 Δ=−0.1 [−2.9, +2.7]（15,200 局配对），完全无效，已撤回——
     // 河牌只有面对下注时才由单街求解器接管，其余路径下这套调整没有作用面。
     const turnCtx = layered && view.street === 'turn' ? turnTexture(view.board) : null;
-    const sizeFactor = flopCtx
+    // 纹理层先把尺度算完（干燥面压小 / 湿润面放大）。
+    const textureFactor = flopCtx
       ? textureSizeFactor(flopCtx.texture)
       : turnCtx
         ? turnSizeFactor(turnCtx)
         : 1;
+    // 范围优势层：在**纹理层的结果**上做 ≤±12% 的修正，不再另起一套乘子。
+    // 只在挑战档、翻牌 / 转牌、且 |edge| > RANGE_EDGE_THRESHOLD 时生效；
+    // 最终值统一 clamp 在 [SIZE_FACTOR_MIN, SIZE_FACTOR_MAX]，两层不会连乘失控。
+    const rangeEdge =
+      ctx.challenge && ctx.rangeEdge && (view.street === 'flop' || view.street === 'turn')
+        ? rangeEdgeFor(ctx)
+        : 0;
+    const sizeFactor = rangeEdgeSizeFactor(textureFactor, rangeEdge);
+    if (Math.abs(rangeEdge) > RANGE_EDGE_THRESHOLD) {
+      rangeEdgeNote =
+        `范围优势 edge ${rangeEdge > 0 ? '+' : ''}${rangeEdge.toFixed(3)}` +
+        `（纹理 ${textureFactor.toFixed(2)} → 尺度 ${sizeFactor.toFixed(2)}）；`;
+    }
     const baseSize = pickExpertBetFraction(ctx, equity, exploit.sizeBias);
     const size = Math.min(1, baseSize * sizeFactor);
     const bet = buildAggressive(legal, targetFromFraction(view, legal, size));
@@ -1129,7 +1208,7 @@ function decideExpertPostflop(
     `专家风格：${analysis.categoryName}，范围收窄后蒙特卡洛 ${iterations} 次胜率 ` +
     `${(equity * 100).toFixed(1)}%，底池赔率 ${(ctx.potOdds * 100).toFixed(1)}%，` +
     `SPR ${spr.toFixed(2)}；对手 ${opponentCount} 人（加注 ${totalRaises} 次 / 跟注 ${totalCalls} 次）；` +
-    `${note}；${plan}；剥削：${exploit.note}。`;
+    `${rangeEdgeNote}${note}；${plan}；剥削：${exploit.note}。`;
   return { action, reasoning };
 }
 
@@ -1663,6 +1742,7 @@ async function decideCore(
     closeness,
     exploitEnabled: options.exploit !== false,
     flopLayer: options.flopLayer !== false,
+    rangeEdge: options.rangeEdge !== false,
     archetypeId,
     timingTells,
     bettingTells,
