@@ -23,7 +23,7 @@ type OpponentKind = 'expert' | 'caller' | 'folder' | 'tight' | 'shover';
 
 const PLAYERS = Math.max(2, Math.min(6, Number(process.env.PLAYERS ?? 2)));
 const HANDS = Math.max(20, Math.floor(Number(process.env.HANDS ?? 2000)));
-const MAX_ITER = Math.max(50, Math.floor(Number(process.env.MAX_ITER ?? 800)));
+const MAX_ITER = Math.max(0, Math.floor(Number(process.env.MAX_ITER ?? 0)));
 const SOLVER_ON = process.env.SOLVER !== '0';
 const SOLVER_ITERATIONS = Math.max(10, Math.floor(Number(process.env.SOLVER_ITERATIONS ?? 200)));
 const SOLVER_COMBOS = Math.max(10, Math.floor(Number(process.env.SOLVER_COMBOS ?? 60)));
@@ -104,7 +104,7 @@ async function playHand(seed: string, challengeSeat: number, opponent: OpponentK
     if (index === challengeSeat) {
       const decision = await decide(view, 'expert', {
         challenge: true,
-        maxIterations: MAX_ITER,
+        ...(MAX_ITER > 0 ? { maxIterations: MAX_ITER } : {}),
         ...(SOLVER_ON
           ? { solver: { iterations: SOLVER_ITERATIONS, maxCombos: SOLVER_COMBOS } }
           : { solver: { enabled: false } }),
@@ -120,7 +120,7 @@ async function playHand(seed: string, challengeSeat: number, opponent: OpponentK
     } else if (PLAYERS === 2 && opponent !== 'expert') {
       action = fixedAction(opponent, view.legal!);
     } else {
-      action = (await decide(view, 'expert', { maxIterations: MAX_ITER })).action;
+      action = (await decide(view, 'expert', { ...(MAX_ITER > 0 ? { maxIterations: MAX_ITER } : {}) })).action;
     }
     table = act(table, index, action);
   }

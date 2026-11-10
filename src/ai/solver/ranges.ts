@@ -132,13 +132,14 @@ export function updateRangeOnStreet(
   view: PlayerView,
   playerId: number,
   street: Street,
+  board: readonly Card[] = view.board,
 ): Range {
   if (street === 'preflop') return range;
   const actions = actionsOf(view, playerId, street);
   if (actions.length === 0) return range;
-  const board = view.board;
+  // 这里必须是「该街当时的公共牌」，不能用最终的 5 张看翻牌动作，否则是前视偏差。
   if (board.length < 3) return range;
-  const texture = view.board.length >= 3 ? boardWetness(board) : 0;
+  const texture = boardWetness(board);
   const next: Range = new Map();
   for (const [key, weight] of range) {
     const [first, second] = parseComboKey(key);
@@ -204,7 +205,9 @@ export function buildRangeForPlayer(
   let range = preflopRangeFor(view, playerId, includeSelfCards);
   const currentIndex = STREET_ORDER.indexOf(view.street);
   for (let index = 1; index <= currentIndex; index++) {
-    range = updateRangeOnStreet(range, view, playerId, STREET_ORDER[index]);
+    // 第 index 街的公共牌数量：flop=3 / turn=4 / river=5。
+    const boardAtStreet = view.board.slice(0, 2 + index);
+    range = updateRangeOnStreet(range, view, playerId, STREET_ORDER[index], boardAtStreet);
   }
   return range;
 }

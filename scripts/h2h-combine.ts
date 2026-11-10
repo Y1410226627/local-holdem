@@ -23,6 +23,8 @@ import { readFileSync } from 'node:fs';
 interface Rec { hand: number; seed: string; newSeat: number; net: number }
 
 const files = process.argv.slice(2);
+const EXPECT_START = process.env.EXPECT_HAND_START ? Number(process.env.EXPECT_HAND_START) : null;
+const EXPECT_HANDS = process.env.EXPECT_HANDS ? Number(process.env.EXPECT_HANDS) : null;
 if (files.length === 0) {
   console.error('用法: npx tsx scripts/h2h-combine.ts <分片.jsonl> [更多...]');
   process.exit(1);
@@ -63,6 +65,14 @@ if (dups.length > 0) {
 const hands = [...new Set([...byKey.values()].map((r) => r.hand))].sort((a, b) => a - b);
 const minHand = hands[0];
 const maxHand = hands[hands.length - 1];
+if (EXPECT_START !== null && minHand !== EXPECT_START) {
+  console.error(`起始手号不符：期望 ${EXPECT_START}，实际 ${minHand}（可能缺头部分片）`);
+  process.exit(1);
+}
+if (EXPECT_HANDS !== null && hands.length !== EXPECT_HANDS) {
+  console.error(`手数不符：期望 ${EXPECT_HANDS} 个 seed，实际 ${hands.length} 个（可能缺尾部分片）`);
+  process.exit(1);
+}
 const missing: string[] = [];
 for (let h = minHand; h <= maxHand; h++) {
   const a = byKey.get(`${h}#0`);

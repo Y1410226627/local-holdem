@@ -27,17 +27,26 @@
  * `assign`=按 seed 分配 5 个原型，用来量「真实原型分布」下的差距——本脚本每手重抽一张桌子，
  * 所以 assign 得到的是跨原型平均，不是真实游戏里「一张桌子固定一批原型」的分布）。
  */
-import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { appendFileSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
+import { dirname, join, isAbsolute, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { act, createTable, startNextHand } from '../src/game/stateMachine';
 import { buildPlayerView } from '../src/game/playerView';
 import { decide as decideNew } from '../src/ai/aiPlayer';
-import { decide as decideOld } from '../../德州扑克_old/src/ai/aiPlayer';
 import { assignChallengeArchetypes } from '../src/ai/challenge';
 import type { PlayerAction, TableState } from '../src/game/types';
 
 const HAND_START = Number(process.env.HAND_START ?? 0);
 const HANDS = Number(process.env.HANDS ?? 600);
+const OLD_DIR = process.env.OLD_DIR ?? '../../德州扑克_old';
+const scriptDir = dirname(fileURLToPath(import.meta.url));
+const oldDirAbs = isAbsolute(OLD_DIR) ? OLD_DIR : resolve(scriptDir, OLD_DIR);
+const oldEntry = join(oldDirAbs, 'src', 'ai', 'aiPlayer.ts');
+if (!existsSync(oldEntry)) {
+  console.error(`找不到老版本 AI：${oldEntry}\n请设置 OLD_DIR，或用 git worktree add 准备旧版本目录。`);
+  process.exit(1);
+}
+const decideOld = (await import(pathToFileURL(oldEntry).href)).decide as typeof decideNew;
 const OLD_CHALLENGE = (process.env.OLD ?? '1') === '1';
 const NEW_CHALLENGE = (process.env.NEW_CHALLENGE ?? '1') === '1';
 const STACK = Number(process.env.STACK ?? 1000);
@@ -66,6 +75,22 @@ const MAX_ITER = Number(process.env.MAX_ITER ?? 0);
  */
 const ARCH = process.env.ARCH ?? 'fixed';
 const OUT = process.env.OUT ?? '';
+/** 写入 JSONL 的配置标识：供 h2h-diff / 事后审计确认两批是同一套开关、同一份代码。 */
+const RUN_META = {
+  arch: ARCH,
+  newChallenge: NEW_CHALLENGE,
+  oldChallenge: OLD_CHALLENGE,
+  newSolver: NEW_SOLVER,
+  newExploit: NEW_EXPLOIT,
+  newBlueprint: NEW_BLUEPRINT,
+  newBpRanges: NEW_BP_RANGES,
+  newBpGate: NEW_BP_GATE,
+  newPfExploit: NEW_PF_EXPLOIT,
+  newFlopBp: NEW_FLOP_BP,
+  newFlop: process.env.NEW_FLOP !== '0',
+  oldDir: oldDirAbs,
+  stack: STACK,
+};
 
 interface Side {
   challenge: boolean;
@@ -117,7 +142,10 @@ async function play(seed: string, newSeat: number): Promise<number> {
       options.blueprintStackGate = NEW_BP_GATE;
       options.preflopExploitModel = NEW_PF_EXPLOIT;
       options.exploit = NEW_EXPLOIT;
-      if (!NEW_SOLVER) options.turnRiver = { ...(options.turnRiver ?? {}), enabled: false };
+      if (!NEW_SOLVER) {
+        options.turnRiver = { ...(options.turnRiver ?? {}), enabled: false };
+        options.solver = { ...(options.solver ?? {}), enabled: false };
+      }
       // NEW_FLOP=0：消融关闭挑战档翻牌层（对照实验用）。
       if (process.env.NEW_FLOP === '0') options.flopLayer = false;
     }
@@ -143,8 +171,8 @@ for (let h = HAND_START; h < HAND_START + HANDS; h++) {
   const net1 = -(await play(seed, 1));
   nets.push(net0, net1);
   if (OUT) {
-    appendFileSync(OUT, JSON.stringify({ hand: h, seed, newSeat: 0, net: net0 }) + '\n');
-    appendFileSync(OUT, JSON.stringify({ hand: h, seed, newSeat: 1, net: net1 }) + '\n');
+    appendFileSync(OUT, JSON.stringify({ hand: h, seed, newSeat: 0, net: net0, ...RUN_META }) + '\n');
+    appendFileSync(OUT, JSON.stringify({ hand: h, seed, newSeat: 1, net: net1, ...RUN_META }) + '\n');
   }
 }
 

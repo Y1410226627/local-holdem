@@ -42,7 +42,7 @@
 import type { Card, PlayerAction } from '../../game/types';
 import type { PlayerView } from '../../game/playerView';
 import { derivedRng } from '../../game/cards';
-import { comboKey, showdownSign } from './abstraction';
+import { comboKey, parseComboKey, showdownSign } from './abstraction';
 import {
   buildRangeForPlayer,
   buildStreetRanges,
@@ -282,8 +282,17 @@ export function solveStreetSubgame(
   if (hero.length !== 2) return null;
 
   const rangeMap = options.ranges ?? buildStreetRanges(view);
-  const villainRange = rangeMap.get(opponent.id);
-  if (!villainRange) return null;
+  const villainRangeRaw = rangeMap.get(opponent.id);
+  if (!villainRangeRaw) return null;
+  // 不能直接改缓存里的范围：拷贝一份，并把英雄实际底牌从对手范围里移除。
+  const villainRange: Range = new Map(villainRangeRaw);
+  for (const key of [...villainRange.keys()]) {
+    const [first, second] = parseComboKey(key);
+    if (hero.some((card) => (card.rank === first.rank && card.suit === first.suit) || (card.rank === second.rank && card.suit === second.suit))) {
+      villainRange.delete(key);
+    }
+  }
+  normalizeRange(villainRange);
   const rng = derivedRng('subgame-cfr', view.seed, view.actions.length, view.street);
   const maxCombos = Math.max(8, Math.floor(options.maxCombos ?? 40));
 
@@ -316,16 +325,40 @@ export function solveStreetSubgame(
   if (tree.actions.length === 0) return null;
 
   // 摊牌矩阵：signs[h*nV+v] ∈ {+1,0,-1}，只算一次。
+  // compat[h,v] = 1 表示这对组合不共用牌；共用的组合是「不可能发牌」，必须从双方的
+  // 反事实价值里排除，否则会给 CFR 注入不可能出现的摊牌结果。
+  const compat = new Uint8Array(nH * nV);
   const signs = new Float64Array(nH * nV);
   for (let h = 0; h < nH; h++) {
+    const hc = [heroCombos[h].combo.first, heroCombos[h].combo.second] as const;
     for (let v = 0; v < nV; v++) {
-      signs[h * nV + v] = showdownSign(
-        [heroCombos[h].combo.first, heroCombos[h].combo.second],
-        [villainCombos[v].combo.first, villainCombos[v].combo.second],
-        view.board,
-      );
+      const vc = [villainCombos[v].combo.first, villainCombos[v].combo.second] as const;
+      const shared =
+        (hc[0].rank === vc[0].rank && hc[0].suit === vc[0].suit) ||
+        (hc[0].rank === vc[1].rank && hc[0].suit === vc[1].suit) ||
+        (hc[1].rank === vc[0].rank && hc[1].suit === vc[0].suit) ||
+        (hc[1].rank === vc[1].rank && hc[1].suit === vc[1].suit);
+      if (!shared) {
+        compat[h * nV + v] = 1;
+        signs[h * nV + v] = showdownSign([hc[0], hc[1]], [vc[0], vc[1]], view.board);
+      }
     }
   }
+
+  // 兼容 reach 和：共用牌的组合不可能同时出现，直接排除。
+  // 注意不要在这里做除法归一化——深层节点上对手 reach 会指数衰减，
+  // 除以一个接近 0 的和会把遗憾放大到 1e10 量级，策略直接崩掉。
+  const villainReachFor = (h: number, villainReach: Float64Array): number => {
+    let total = 0;
+    const row = h * nV;
+    for (let v = 0; v < nV; v++) if (compat[row + v]) total += villainReach[v];
+    return total;
+  };
+  const heroReachFor = (v: number, heroReach: Float64Array): number => {
+    let total = 0;
+    for (let h = 0; h < nH; h++) if (compat[h * nV + v]) total += heroReach[h];
+    return total;
+  };
 
   // 初始 reach = 归一化后的范围权重（chance 已包含在权重里）。
   const heroRootReach = new Float64Array(nH);
@@ -368,15 +401,14 @@ export function solveStreetSubgame(
     averageWeight: number,
   ): void => {
     if (node.kind === 'heroFold') {
-      const totalVillain = sumOf(villainReach);
-      outHero.fill(-node.invested * totalVillain);
-      outVillain.fill(node.invested * sumOf(heroReach));
+      for (let h = 0; h < nH; h++) outHero[h] = -node.invested * villainReachFor(h, villainReach);
+      for (let v = 0; v < nV; v++) outVillain[v] = node.invested * heroReachFor(v, heroReach);
       return;
     }
     if (node.kind === 'villainFold') {
       const win = node.pot - node.invested;
-      outHero.fill(win * sumOf(villainReach));
-      outVillain.fill(-win * sumOf(heroReach));
+      for (let h = 0; h < nH; h++) outHero[h] = win * villainReachFor(h, villainReach);
+      for (let v = 0; v < nV; v++) outVillain[v] = -win * heroReachFor(v, heroReach);
       return;
     }
     if (node.kind === 'showdown') {
@@ -387,6 +419,7 @@ export function solveStreetSubgame(
         const row = h * nV;
         let total = 0;
         for (let v = 0; v < nV; v++) {
+          if (!compat[row + v]) continue;
           const sign = signs[row + v];
           const payoff = sign > 0 ? win : sign < 0 ? lose : tie;
           total += payoff * villainReach[v];
@@ -396,11 +429,12 @@ export function solveStreetSubgame(
       for (let v = 0; v < nV; v++) {
         let total = 0;
         for (let h = 0; h < nH; h++) {
+          if (!compat[h * nV + v]) continue;
           const sign = signs[h * nV + v];
           const payoff = sign > 0 ? win : sign < 0 ? lose : tie;
-          total -= payoff * heroReach[h];
+          total += payoff * heroReach[h];
         }
-        outVillain[v] = total;
+        outVillain[v] = -total;
       }
       return;
     }

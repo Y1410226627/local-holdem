@@ -26,14 +26,25 @@
  *   corrSameSeed             同 seed 两局的相关系数 ρ（ρ=1 说明换座位没有产生新信息）
  *   ci95Naive                旧口径（把 2H 局当独立样本），只用于和历史数字逐位对账
  */
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import path from 'node:path';
+import { existsSync } from 'node:fs';
 import { act, createTable, startNextHand } from '../src/game/stateMachine';
 import { buildPlayerView } from '../src/game/playerView';
 import { decide as decideNew } from '../src/ai/aiPlayer';
-import { decide as decideOld } from '../../德州扑克_old/src/ai/aiPlayer';
 import { assignChallengeArchetypes } from '../src/ai/challenge';
 import type { PlayerAction, TableState } from '../src/game/types';
 
 const HANDS = Number(process.env.HANDS ?? 600);
+const OLD_DIR = process.env.OLD_DIR ?? '../../德州扑克_old';
+const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+const oldDirAbs = path.isAbsolute(OLD_DIR) ? OLD_DIR : path.resolve(scriptDir, OLD_DIR);
+const oldEntry = path.join(oldDirAbs, 'src', 'ai', 'aiPlayer.ts');
+if (!existsSync(oldEntry)) {
+  console.error(`找不到老版本 AI：${oldEntry}\n请设置 OLD_DIR，或用 git worktree add 准备旧版本目录。`);
+  process.exit(1);
+}
+const decideOld = (await import(pathToFileURL(oldEntry).href)).decide as typeof decideNew;
 const OLD_CHALLENGE = (process.env.OLD ?? '1') === '1';
 const NEW_CHALLENGE = (process.env.NEW_CHALLENGE ?? '1') === '1';
 const STACK = Number(process.env.STACK ?? 1000);
@@ -183,6 +194,7 @@ const corr = cov / Math.max(1e-12, Math.sqrt(vx * vy));
 
 const bb = (v: number) => Number((v / 20 * 100).toFixed(1));
 console.log(JSON.stringify({
+  oldDir: oldDirAbs,
   newTier: (NEW_CHALLENGE ? '挑战宗师' : '专家') +
     ` [sbWide=${NEW_SBWIDE} bp=${NEW_BLUEPRINT} bpGate=${NEW_BP_GATE} pfExploit=${NEW_PF_EXPLOIT} solver=${NEW_SOLVER} exploit=${NEW_EXPLOIT} arch=${ARCH}]`,
   oldTier: OLD_CHALLENGE ? '挑战宗师' : '专家',

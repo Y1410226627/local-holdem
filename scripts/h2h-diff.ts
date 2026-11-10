@@ -18,7 +18,25 @@
  */
 import { readFileSync } from 'node:fs';
 
-interface Rec { hand: number; seed: string; newSeat: number; net: number }
+interface Rec {
+  hand: number;
+  seed: string;
+  newSeat: number;
+  net: number;
+  arch?: string;
+  newChallenge?: boolean;
+  oldChallenge?: boolean;
+  newSolver?: boolean;
+  newExploit?: boolean;
+  newBlueprint?: boolean;
+  newBpRanges?: boolean;
+  newBpGate?: boolean;
+  newPfExploit?: boolean;
+  newFlopBp?: boolean;
+  newFlop?: boolean;
+  oldDir?: string;
+  stack?: number;
+}
 
 const sep = process.argv.indexOf('--');
 if (sep < 0 || sep === process.argv.length - 1 || sep === 2) {
@@ -56,6 +74,20 @@ for (const key of base.keys()) {
   if (!variant.has(key)) {
     console.error(`seed/座位对不上：基线有 ${key}，变体没有。两批必须跑**同一段 HAND_START..HANDS**`);
     process.exit(1);
+  }
+  const b = base.get(key)!;
+  const v = variant.get(key)!;
+  if (b.seed !== v.seed) {
+    console.error(`seed 不一致：${key} 基线 seed=${b.seed}、变体 seed=${v.seed}。配对差分要求同一批牌。`);
+    process.exit(1);
+  }
+  for (const field of ['arch', 'newChallenge', 'oldChallenge', 'newSolver', 'newExploit', 'newBlueprint', 'newBpRanges', 'newBpGate', 'newPfExploit', 'newFlopBp', 'newFlop', 'oldDir', 'stack'] as const) {
+    if (b[field] !== undefined || v[field] !== undefined) {
+      if (b[field] !== v[field]) {
+        console.error(`配置不一致：${key} 的 ${field} 基线=${String(b[field])}、变体=${String(v[field])}。A/B 只允许一个变量不同。`);
+        process.exit(1);
+      }
+    }
   }
 }
 

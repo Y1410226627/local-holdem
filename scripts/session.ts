@@ -45,7 +45,7 @@ function fixed(kind: Kind, legal: { canCheck: boolean; canCall: boolean; canAllI
 }
 
 async function session(): Promise<number[]> {
-  const tableSeed = `sess-${KIND}-${SEAT}`;
+  const tableSeed = `sess-${KIND}-${SEAT}-${ARCH}`;
   let table: TableState = createTable({
     playerCount: 2, startingStack: STACK, smallBlind: 10, bigBlind: 20,
     seed: tableSeed, difficulty: DIFF, challengeMode: CHALLENGE,

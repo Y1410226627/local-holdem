@@ -23,7 +23,7 @@
 import type { Card, PlayerAction } from '../../game/types';
 import type { PlayerView } from '../../game/playerView';
 import { derivedRng, createDeck } from '../../game/cards';
-import { cardKey, comboKey, showdownSign } from './abstraction';
+import { cardKey, comboKey, parseComboKey, showdownSign } from './abstraction';
 import {
   buildRangeForPlayer,
   buildStreetRanges,
@@ -423,6 +423,7 @@ function buildRiverBuckets(input: {
   board: readonly Card[];
   heroCombos: readonly RangeEntry[];
   villainCombos: readonly RangeEntry[];
+  compat: Uint8Array;
   buckets: number;
 }): Array<{ weight: number; signs: Float64Array; cards: Card[] }> {
   const used = new Set(input.board.map(cardKey));
@@ -460,6 +461,7 @@ function buildRiverBuckets(input: {
       for (let h = 0; h < nH; h++) {
         const hero = input.heroCombos[h].combo;
         for (let v = 0; v < nV; v++) {
+          if (!input.compat[h * nV + v]) continue;
           const villain = input.villainCombos[v].combo;
           const blocked = new Set([
             cardKey(hero.first),
@@ -512,8 +514,16 @@ export function solveTurnRiver(
   if (hero.length !== 2) return null;
 
   const rangeMap = options.ranges ?? buildStreetRanges(view);
-  const villainRange = rangeMap.get(opponent.id);
-  if (!villainRange) return null;
+  const villainRangeRaw = rangeMap.get(opponent.id);
+  if (!villainRangeRaw) return null;
+  const villainRange: Range = new Map(villainRangeRaw);
+  for (const key of [...villainRange.keys()]) {
+    const [first, second] = parseComboKey(key);
+    if (hero.some((card) => (card.rank === first.rank && card.suit === first.suit) || (card.rank === second.rank && card.suit === second.suit))) {
+      villainRange.delete(key);
+    }
+  }
+  normalizeRange(villainRange);
 
   const rng = derivedRng('turn-river-cfr', view.seed, view.actions.length, view.street);
   const maxCombos = Math.max(8, Math.floor(options.maxCombos ?? 24));
@@ -528,10 +538,40 @@ export function solveTurnRiver(
   const actualHeroIndex = heroCombos.findIndex((entry) => entry.combo.key === heroKey);
   if (actualHeroIndex < 0) return null;
 
+  // compat[h,v]=1 表示双方组合不共用牌；共用牌的组合不可能同时出现。
+  const compat = new Uint8Array(nH * nV);
+  for (let h = 0; h < nH; h++) {
+    const hc = heroCombos[h].combo;
+    for (let v = 0; v < nV; v++) {
+      const vc = villainCombos[v].combo;
+      const shared =
+        (hc.first.rank === vc.first.rank && hc.first.suit === vc.first.suit) ||
+        (hc.first.rank === vc.second.rank && hc.first.suit === vc.second.suit) ||
+        (hc.second.rank === vc.first.rank && hc.second.suit === vc.first.suit) ||
+        (hc.second.rank === vc.second.rank && hc.second.suit === vc.second.suit);
+      if (!shared) compat[h * nV + v] = 1;
+    }
+  }
+
+  // 兼容 reach 和：共用牌的组合不可能同时出现，直接排除。
+  // 不做除法归一化：深层节点对手 reach 指数衰减，除以接近 0 的项会炸掉遗憾。
+  const villainReachFor = (h: number, villainReach: Float64Array): number => {
+    let total = 0;
+    const row = h * nV;
+    for (let v = 0; v < nV; v++) if (compat[row + v]) total += villainReach[v];
+    return total;
+  };
+  const heroReachFor = (v: number, heroReach: Float64Array): number => {
+    let total = 0;
+    for (let h = 0; h < nH; h++) if (compat[h * nV + v]) total += heroReach[h];
+    return total;
+  };
+
   const branches = buildRiverBuckets({
     board: view.board,
     heroCombos,
     villainCombos,
+    compat,
     buckets: options.riverBuckets ?? 4,
   });
   if (branches.length === 0) return null;
@@ -590,14 +630,14 @@ export function solveTurnRiver(
     evaluateOnly = false,
   ): void => {
     if (node.kind === 'heroFold') {
-      outHero.fill(-node.invested * sumOf(villainReach));
-      outVillain.fill(node.invested * sumOf(heroReach));
+      for (let h = 0; h < nH; h++) outHero[h] = -node.invested * villainReachFor(h, villainReach);
+      for (let v = 0; v < nV; v++) outVillain[v] = node.invested * heroReachFor(v, heroReach);
       return;
     }
     if (node.kind === 'villainFold') {
       const win = node.pot - node.invested;
-      outHero.fill(win * sumOf(villainReach));
-      outVillain.fill(-win * sumOf(heroReach));
+      for (let h = 0; h < nH; h++) outHero[h] = win * villainReachFor(h, villainReach);
+      for (let v = 0; v < nV; v++) outVillain[v] = -win * heroReachFor(v, heroReach);
       return;
     }
     if (node.kind === 'showdown') {
@@ -608,6 +648,7 @@ export function solveTurnRiver(
         const row = h * nV;
         let total = 0;
         for (let v = 0; v < nV; v++) {
+          if (!compat[row + v]) continue;
           const sign = signs[row + v];
           total += (sign > 0 ? win : sign < 0 ? lose : tie) * villainReach[v];
         }
@@ -616,10 +657,11 @@ export function solveTurnRiver(
       for (let v = 0; v < nV; v++) {
         let total = 0;
         for (let h = 0; h < nH; h++) {
+          if (!compat[h * nV + v]) continue;
           const sign = signs[h * nV + v];
-          total -= (sign > 0 ? win : sign < 0 ? lose : tie) * heroReach[h];
+          total += (sign > 0 ? win : sign < 0 ? lose : tie) * heroReach[h];
         }
-        outVillain[v] = total;
+        outVillain[v] = -total;
       }
       return;
     }
