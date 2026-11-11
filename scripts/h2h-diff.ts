@@ -34,6 +34,8 @@ interface Rec {
   newPfExploit?: boolean;
   newFlopBp?: boolean;
   newFlop?: boolean;
+  newMc?: number;
+  newCloseness?: number;
   oldDir?: string;
   stack?: number;
 }
@@ -81,7 +83,7 @@ for (const key of base.keys()) {
     console.error(`seed 不一致：${key} 基线 seed=${b.seed}、变体 seed=${v.seed}。配对差分要求同一批牌。`);
     process.exit(1);
   }
-  for (const field of ['arch', 'newChallenge', 'oldChallenge', 'newSolver', 'newExploit', 'newBlueprint', 'newBpRanges', 'newBpGate', 'newPfExploit', 'newFlopBp', 'newFlop', 'oldDir', 'stack'] as const) {
+  for (const field of ['arch', 'newChallenge', 'oldChallenge', 'newSolver', 'newExploit', 'newBlueprint', 'newBpRanges', 'newBpGate', 'newPfExploit', 'newFlopBp', 'newFlop', 'newMc', 'newCloseness', 'oldDir', 'stack'] as const) {
     if (b[field] !== undefined || v[field] !== undefined) {
       if (b[field] !== v[field]) {
         console.error(`配置不一致：${key} 的 ${field} 基线=${String(b[field])}、变体=${String(v[field])}。A/B 只允许一个变量不同。`);

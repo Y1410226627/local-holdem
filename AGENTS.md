@@ -15,13 +15,17 @@
 - **玩家名称**：人类名、本地算法机器人名、大模型名均可自定义（`TableConfig.humanName` / `localBotNames` / `llmSeats[].name`）。
 - **体验随机 / 风格**：每个机器人座位在 `createTable` 时由 seed 分配 `styleId`（`src/ai/style.ts` 的 6 种风格），AI 决策时叠加在难度 profile 上（偏移有限）；洗牌与决策使用 `xoshiro128**` + 用途派生随机流；本地机器人台词与思考时间抖动也在 `style.ts` / `useAiDriver.ts`。修改相关代码需更新 `style.test.ts` / `randomness.test.ts`，并保持同 seed 可复现。
 - **真人化决策**：`src/ai/humanModel.ts` 提供跨手公开统计（VPIP / PFR / 攻击性 / 面对下注弃牌率）、情绪、按难度分级的对手利用与真人式失误、fold-equity 近似 EV 尺度；`stateMachine.ts` 在每手结束累计 `statsRaw` 与 `mood`，`aiPlayer.ts` 接入四档决策，座位 HUD 显示跨手画像，LLM 提示词带 `READS` 画像。这些状态只能由公开动作推导，不得读取隐藏信息；改动需更新 `humanModel.test.ts`。
-- **挑战宗师模式（静态分流，不再逐手回退）**：`options.challenge` 下按人数选引擎——单挑翻前用离线 CFR+ 蓝图（只接 BB 防守）+ SB 放宽；单挑河牌 `solveStreetSubgame()`（双边范围、全树遍历全部 combo 同时更新的 vanilla CFR+，含加注）**默认启用**（`ENABLE_RIVER_SOLVER = true`）：挑战档单挑河牌「面对下注」时直接求解，专家档单挑河牌以 20% 概率采用；3 人用旧范围 + 多人谨慎 + 挑战启发式；4–6 人用专家启发式 + 多人谨慎。**禁止**再把挑战动作改回 `expertDecision.action`；`pickChallengeDecision` 已删除。改动需更新 `challenge.test.ts`、`solver.test.ts`、`families.test.ts`。
-- **CFR+ / 翻前蓝图 / 河牌求解 / 按街范围**：`src/ai/solver/` 是新的算法层。`cfr.ts` 提供遗憾匹配+、线性平均、矩阵博弈求解；`abstraction.ts` 按**真实胜率**分 24 个桶（不再用 Chen 分数）并提供牌面纹理 / 组合；`preflop.ts` 在 HU 抽象树上跑 CFR+ 并查 `data/preflop-blueprint.json`（24 桶、SB+BB 双边已接入运行时，SB 树禁用跛入）；`buildBlueprintRangeWeights()` 用蓝图动作频率推出翻后范围（策略一致先验）；`subgameTurn.ts` 做**转+河联合求解**（河牌按牌面分 3 桶、桶内矩阵平均；终点是摊牌，无需价值函数），**自 v0.25.3 起默认关闭**（`ENABLE_TURN_RIVER_SOLVER = false`；实测 −2.5 BB/100 [−12.2, +7.3]，扩大覆盖无证据）；`subgame.ts` 对 HU 河牌做**双边范围 vanilla CFR+**（全树遍历、全部 combo 同时更新；check/bet 33/50/100，fold/call/raise；平均策略跳过前 50% 迭代、前 30 轮按 √T/(√T+1) 折减遗憾），**默认启用**（见上一条）；`ranges.ts` 做按街贝叶斯范围更新（已实现，但启发式仍用旧 `buildChallengeRanges`，因为新似然参数下基准更差）；`blueprint.ts` 负责加载。离线生成：`npm run gto:equity` / `npm run gto:blueprint`。**约束**：求解器只接收 `PlayerView` + 自己底牌；不得把 `HandState` / `deck` / `burned` / 对手底牌传进去。改动需更新 `solver.test.ts`。
+- **挑战宗师模式（静态分流，不再逐手回退）**：`options.challenge` 下按人数选引擎——单挑翻前用离线 CFR+ 蓝图（只接 BB 防守）+ SB 放宽；单挑河牌 `solveStreetSubgame()`（双边范围、全树遍历全部 combo 同时更新的 vanilla CFR+，含加注）**v0.26 起挑战档默认关闭**（需显式 `options.solver.enabled === true`；消融：关闭后对当前专家 +11.6 [5.0,18.2]、对 v0.3.0 +7.9 [2.2,13.7]），专家档单挑河牌仍以 20% 概率采用；3 人用旧范围 + 多人谨慎 + 挑战启发式；4–6 人用专家启发式 + 多人谨慎。**禁止**再把挑战动作改回 `expertDecision.action`；`pickChallengeDecision` 已删除。改动需更新 `challenge.test.ts`、`solver.test.ts`、`families.test.ts`。
+- **CFR+ / 翻前蓝图 / 河牌求解 / 按街范围**：`src/ai/solver/` 是新的算法层。`cfr.ts` 提供遗憾匹配+、线性平均、矩阵博弈求解；`abstraction.ts` 按**真实胜率**分 24 个桶（不再用 Chen 分数）并提供牌面纹理 / 组合；`preflop.ts` 在 HU 抽象树上跑 CFR+ 并查 `data/preflop-blueprint.json`（24 桶、SB+BB 双边已接入运行时，SB 树禁用跛入）；`buildBlueprintRangeWeights()` 用蓝图动作频率推出翻后范围（策略一致先验）；`subgameTurn.ts` 做**转+河联合求解**（河牌按牌面分 3 桶、桶内矩阵平均；终点是摊牌，无需价值函数），**自 v0.25.3 起默认关闭**（`ENABLE_TURN_RIVER_SOLVER = false`；实测 −2.5 BB/100 [−12.2, +7.3]，扩大覆盖无证据）；`subgame.ts` 对 HU 河牌做**双边范围 vanilla CFR+**（全树遍历、全部 combo 同时更新；check/bet 33/50/100，fold/call/raise；平均策略跳过前 50% 迭代、前 30 轮按 √T/(√T+1) 折减遗憾），**挑战档 v0.26 起默认关闭**（显式开启才用；消融显著为正）；`ranges.ts` 做按街贝叶斯范围更新（已实现，但启发式仍用旧 `buildChallengeRanges`，因为新似然参数下基准更差）；`blueprint.ts` 负责加载。离线生成：`npm run gto:equity` / `npm run gto:blueprint`。**约束**：求解器只接收 `PlayerView` + 自己底牌；不得把 `HandState` / `deck` / `burned` / 对手底牌传进去。改动需更新 `solver.test.ts`。
 - **翻前决策必须走 EV 引擎（v0.21.0 起）**：`src/ai/preflopEv.ts` 对 fold / check / call / raise 逐个算期望值取最大，
   `decidePreflop` 只负责组装输入（范围估计、加注尺度、噪声）。**禁止**再引入「入池线 / 加注线 / 3-bet 线」这类阈值表——
   它们有三个结构性缺陷：跟注额不参与决策、位置只改阈值不改价值、加注不看弃牌率。
   EV 公式里四项参数（对手范围、权益实现率、弃牌率、被再加注率）都必须有依据，改动要同步 README 的校准表。
   **开池阶段禁止跛入**（除非前面有人跛入或单挑 SB）：纯 EV 上跛入看着便宜，但会招来加注且翻后无位置。
+
+  **多人池弃牌率（v0.26 修复）**：`foldEquityFor` 面对加注后（raiseCount>=1）按剩余对手数摊薄先验（多人 0.45/n、0.18/n），
+  且实测弃牌率按 p^n 合成——旧实现把「平均每人弃 40%」当成「所有人一起弃 40%」，6 人桌 3-bet 池里会把 55/J6o/94o 的全下算成正 EV。
+  `estimateRaiserRange` 也按对手数收紧多人池 3-bet+ 范围（×0.55）。改动需更新 `preflopEv.test.ts`。
   校准工具：`npm run sweep:preflop`（扫 169 个分类，对照公开 GTO 频率）。改动需更新 `preflopCall.test.ts`。
 
 - **翻前跟注必须看底池赔率（v0.20.0 起，已被 EV 引擎取代）**：`src/ai/preflopCall.ts` 提供「对加注范围胜率 vs 底池赔率」的判定，
@@ -38,6 +42,7 @@
   - 翻前跛入门槛要按「会不会被再加注」分开：攻击性 ≥2.5 的对手门槛 0.65（加注后被反打要亏 3.2BB），单纯不弃牌的跟注站门槛 0.35（不会被反打）。用同一个门槛会让其中一边明显亏。
   - **统计口径前提**：`allin` 必须按「是否抬高下注额」计入 `raises` / `calls`。旧实现完全不计，导致每手全下的对手 `aggression = 0`（被当成最被动的人），上面所有针对激进对手的逻辑都会失效。
   - 只用公开统计（`OpponentSummary`）与公开动作，不得读对手底牌。
+  - **被动价值型（v0.26）**：攻击性 ≤0.5 且面对下注弃牌率 ≥0.35 的对手，只在有牌时投入（HLB polarized 形态）。对他们的检查范围要重锤诈唬、对他们主动下注要收紧跟注线（+0.10×weight）。修复前挑战档在该 bot 上配对差 −69.2（REGRESSION），修复后 +18.2（OK）。
   - 改动需更新 `exploit.test.ts`（14 个零噪声断言 + 接线测试）。
 
 - **单步搜索 / 多人谨慎（保留为启发式层）**：`src/ai/search.ts` 提供单步 EV 搜索与多人谨慎系数；`aiPlayer.ts` 在挑战启发式分支仍会用它，但单挑转/河优先走 `solveStreetSubgame()`。`estimateActionEv` 与搜索都计入 continuation value（口径一致）。改动需更新 `gto.test.ts` 的搜索用例。
@@ -85,7 +90,7 @@ node scripts/setup.mjs --check          # 只检查环境（启动器内部使�
 | --- | --- | --- |
 | 安装依赖 | `npm install --no-audit --no-fund` | 生成 `node_modules/`，退出码 0 |
 | 类型检查 | `npx tsc --noEmit` | 无输出、退出码 0 |
-| 测试 | `npm test` | `37 passed` 测试文件、`499 passed` 用例 |
+| 测试 | `npm test` | `38 passed` 测试文件、`504 passed` 用例 |
 | 基准 | `npm run bench` | 输出各对手 BB/100 + 95% CI + solver 占比 |
 | 剥削审计 | `npm run audit:exploit` | 对 6 种固定对手做配对 A/B（剥削层开/关），输出绝对胜率 + 配对差值 + 95% CI |
 | 翻前蓝图 | `npm run gto:blueprint` | 输出可利用度（产物自报/audit 重算 **0.0054 BB/手** @200000 迭代） |
@@ -139,7 +144,7 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 6. **可复现种子**：引擎随机性由 `seed + handNo` 决定（`src/game/cards.ts`）；UI 默认每局随机种子（`src/ui/seed.ts`）。
 7. **体验随机**：风格/随机化只能小幅调整合法动作与参数，不得破坏难度档差异、不得读取隐藏信息；所有新增随机必须走种子派生流。真人化层（跨手统计 / 情绪 / 真人式失误）同样只能基于公开动作与自己的状态，不得利用隐藏信息。
 8. 不要改动启动脚本的编码/权限约定：`.bat` 为 **UTF-8 无 BOM + CRLF**；`.sh` / `.command` 为 **LF**，且 `.command` / `.sh` 在 git 索引中需要保留可执行位（`chmod +x` / `git update-index --chmod=+x`）。
-9. **版本号（每次提交必做）**：提交前同步递增 `package.json` 与 `package-lock.json` 的 `version`，并让版本号与本次改动在同一个提交里（当前 v0.25.10：修复 / 文档 / 微调递增补丁号，成块功能递增次版本）；提交信息带上版本号。详见 [README.md](README.md)「版本号约定」。
+9. **版本号（每次提交必做）**：提交前同步递增 `package.json` 与 `package-lock.json` 的 `version`，并让版本号与本次改动在同一个提交里（当前 v0.26.0：修复 / 文档 / 微调递增补丁号，成块功能递增次版本）；提交信息带上版本号。详见 [README.md](README.md)「版本号约定」。
 10. **手机 5/6 人桌布局（v0.22.0 起）**：四条不能回退的约束，改动前先用 `npm run shot:mobile` 出图对比：
     ①行牌提示条在手机端必须**随文档流**（不能 `position: fixed` 盖住工具栏与顶部座位）；
     ②中央 `.table-status` 在手机端**隐藏**——它和底部操作区完全重复，且正好压在左右座位上；
@@ -189,6 +194,11 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
       「改动 A/B（同 seed 配对差分）」用 `h2h-diff.ts`（`npx tsx scripts/h2h-diff.ts 基线... -- 变体...`，
       `--` 不能省），**不要拿两条单臂 CI 目测相减**——那会丢掉 18 倍的方差缩减。
       **完整口径（工具 / 样本量 / 判定门槛）见 [`docs/测量规范.md`](docs/测量规范.md)**，报数前先读。
+    - **6 人桌配对**（`head2head6.ts` + `head2head6-combine.ts` / `head2head6-diff.ts`，v0.26 起入库）：
+      challenge 组坐 0/1/2、对照组坐 3/4/5 打一桌，再镜像（challenge 坐 3/4/5）打同一副牌的第二桌；
+      每手记录 (na+nb)/2，先按 seed 平均再取 95% CI。**6 人桌强度只能这样测**——单挑的 +63.4 不能外推到 6 人桌。
+      用法：`OPPONENT=expert SEED_START=0 SEEDS=200 SESSION_HANDS=8 OUT=tmp/h6-0.jsonl npx tsx scripts/head2head6.ts`，
+      然后 `npx tsx scripts/head2head6-combine.ts tmp/h6-*.jsonl`；A/B 用 `head2head6-diff.ts`。
 
 14. **安卓 APK（每次版本更新必做）**：每个版本都要重新执行 `npm run apk` 并更新 `apk/` 目录（只保留当前版本文件），APK 的 versionName 由 `package.json` 自动生成；不要提交签名密钥（默认在 `C:\AndroidToolchain\keystore\`，已在 `android/.gitignore` 忽略）。
 
@@ -199,7 +209,7 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 | `src/game/` | 纯函数规则引擎（牌堆、牌型、下注、边池、状态机、受限视图、日志） |
 | `src/ai/` | 四档难度、范围模型、蒙特卡洛胜率、大模型机器人、训练参数；`data/` 为训练产物 |
 | `src/ui/` | React 界面（教程、大厅、牌桌、设置栏、调试面板、历史回放）；`mobile.ts` 为手机布局判定与安卓壳检测 |
-| `src/tests/` | Vitest 测试（37 个文件 / 499 个用例） |
+| `src/tests/` | Vitest 测试（38 个文件 / 504 个用例） |
 | `src/ai/style.ts` | 体验随机：机器人风格原型 / 下注尺度偏好 / 本地台词 / 变化率 |
 | `src/ai/humanModel.ts` | 真人化：跨手统计 / 情绪 / 对手利用 / 真人式失误 / fold-equity EV |
 | `src/ai/challenge.ts` | 挑战宗师：宗师原型 / 读计时与下注细节 / 计时伪装 / range 极化 / EV 尺度 |
@@ -219,6 +229,7 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 | `scripts/install-node.ps1` / `scripts/launcher-common.sh` | 启动器共用的 Node.js 检测与自动安装（Windows / macOS；Ask/Auto/Check 或 ask/auto/never 模式） |
 | `scripts/train.ts` | 自博弈训练（参数进化 + few-shot 经验 + SFT 数据集 + 报告） |
 | `scripts/head2head.ts` / `h2h-shard.ts` / `h2h-combine.ts` | 新旧版本直接对打：单进程 / 并行分片 / 合并校验（结论只读配对口径 CI，见「关键约束」第 15 条） |
+| `scripts/head2head6.ts` / `head2head6-combine.ts` / `head2head6-diff.ts` | 6 人桌配对测量：challenge 组坐 0/1/2 vs 3/4/5 镜像两桌、同 seed 同牌，输出 seed 级配对 CI / A/B 差分（v0.26 新增） |
 | `android/` | Capacitor 7 安卓工程（应用图标 / 启动图 / 主题 / 清单 / Gradle 配置已定制） |
 | `apk/` | 当前版本的安卓安装包（release 签名，交付物） |
 | `capacitor.config.json` | 安卓壳配置（appId / 应用名 / webDir=dist / 允许 http 本地模型） |
@@ -229,18 +240,18 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 ## 验收清单（DoD）
 
 - [ ] `node scripts/setup.mjs --agent` 退出码 0，输出 `SETUP_RESULT=OK`
-- [ ] `npm test`：37 个测试文件、499 个用例全部通过
+- [ ] `npm test`：38 个测试文件、504 个用例全部通过
 - [ ] `npm run build`：生成 `dist/`，无 TypeScript 错误
 - [ ] `npm run dev -- --host 127.0.0.1 --port 5173 --strictPort` 可启动，HTTP 探测 200
 - [ ] 启动脚本冒烟（按平台）：Windows `启动德州扑克.bat --no-open` / macOS-Linux `bash 启动德州扑克.sh --no-open` 能起服务并返回 200
 - [ ] Node.js 检测语义：已有 Node 时启动器直接跳过安装；缺 Node + `--agent` 时 exit 1 且不安装（需要自动装时用 `--install-node`）
-- [ ] `package.json` 版本号已按约定递增（当前 v0.25.10），并与本次改动在同一个提交
+- [ ] `package.json` 版本号已按约定递增（当前 v0.26.0），并与本次改动在同一个提交
 - [ ] `npm run apk` 退出码 0 且输出 `APK_RESULT=OK`；`apk/` 内只有与 `package.json` 版本一致的 APK
 - [ ] （若本次改了前端）`npm run exe` 退出码 0；`release/Holdem-Setup-<version>.exe` 存在；用冒烟模式跑打包后的 `release/win-unpacked/德州扑克.exe` 输出 `SMOKE_OK`
 - [ ] APK 冒烟：`aapt2 dump badging` 的 versionName 与 `package.json` 一致、label 为「德州扑克」；`apksigner verify` 通过（release 签名）
 - [ ] 手机布局冒烟：390×844 / 360×640 / 844×390 下进行中牌桌与操作区一屏（无纵向滚动 / 横向溢出），桌面 1440×900 正常
 - [ ] 一键同步数据冒烟：`node scripts/sync-data.mjs --help` 退出码 0；`--list` 能识别同级旧版本目录
-- [ ] 挑战宗师冒烟：`npm test` 中 `challenge.test.ts` + `solver.test.ts` + `families.test.ts` 全绿；`npm run bench` 能输出配对 95% CI；当前挑战 vs 专家为 **+51.6 BB/100，配对 95% CI [26.6, 76.7]**（30,400 局，15,200 seed，当前代码 + `ARCH=assign`；历史 80,000 局口径 +6.3 [−8.9, +21.5] 是旧代码对照）；v0.25.10 修复后 HLB `three-bet-caller` 配对差 **+39.8 [−19.6, +99.2]（OK，不再是 REGRESSION）**，但该 bot 只覆盖一类漏洞，**不得在文档/提交信息里宣称“人类无法战胜”或“无漏洞”**；难度选择「挑战宗师」后座位显示徽标、调试面板出现 `CFR+ 蓝图` / `challenge-multiway`（河牌单街求解默认启用），无 console 报错
+- [ ] 挑战宗师冒烟：`npm test` 中 `challenge.test.ts` + `solver.test.ts` + `families.test.ts` 全绿；`npm run bench` 能输出配对 95% CI；v0.26.0 实测：挑战 vs 当前专家（单挑，30,400 局）**+63.4 [37.8, 89.0]**；挑战 vs v0.3.0 专家（45,600 局）**+30.1 [8.1, 52.2]**；6 人桌（镜像配对，10,400 seed）**+19.9 [8.6, 31.2]**；HLB 6 bots 全部 `verdict=OK`。**不得在文档/提交信息里宣称“人类理论上无法战胜”或“无漏洞”**——只能写「已知漏洞机器人集合上不显著为负」；难度选择「挑战宗师」后座位显示徽标、调试面板出现 `CFR+ 蓝图` / `challenge-multiway`（挑战档河牌求解 v0.26 起默认关闭），无 console 报错
 - [ ] 工作区没有 `node_modules/`、`dist/`、日志或临时脚本被误加入提交（`.gitignore` 已覆盖）
 
 ## 常见问题

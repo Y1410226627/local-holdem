@@ -66,6 +66,10 @@ const NEW_PF_EXPLOIT = process.env.NEW_PF_EXPLOIT !== '0';
 let preflopDecisions = 0;
 let preflopExploitHits = 0;
 const MAX_ITER = Number(process.env.MAX_ITER ?? 0);
+/** 挑战档蒙特卡洛迭代覆盖（测量用；0 = 用 profile 默认值）。 */
+const NEW_MC = Number(process.env.NEW_MC ?? 0);
+/** 挑战档 GTO 接近度覆盖（测量用；-1 = 用默认值）。 */
+const NEW_CLOSENESS = Number(process.env.NEW_CLOSENESS ?? -1);
 /**
  * ARCH=fixed（默认）钉死宗师原型 = 0，与历史数字可比；
  * ARCH=assign 用 `assignChallengeArchetypes(seed, 座位 id)` 分配，与 `stateMachine.ts` 的 createTable 同源。
@@ -88,6 +92,8 @@ const RUN_META = {
   newPfExploit: NEW_PF_EXPLOIT,
   newFlopBp: NEW_FLOP_BP,
   newFlop: process.env.NEW_FLOP !== '0',
+  newMc: NEW_MC,
+  newCloseness: NEW_CLOSENESS,
   oldDir: oldDirAbs,
   stack: STACK,
 };
@@ -146,6 +152,8 @@ async function play(seed: string, newSeat: number): Promise<number> {
         options.turnRiver = { ...(options.turnRiver ?? {}), enabled: false };
         options.solver = { ...(options.solver ?? {}), enabled: false };
       }
+      if (NEW_MC > 0) options.mcIterations = NEW_MC;
+      if (NEW_CLOSENESS >= 0) options.closeness = NEW_CLOSENESS;
       // NEW_FLOP=0：消融关闭挑战档翻牌层（对照实验用）。
       if (process.env.NEW_FLOP === '0') options.flopLayer = false;
     }

@@ -156,20 +156,30 @@ export function foldEquityFor(
   // 直接估「所有人都弃牌」的概率，而不是「单人弃牌率 ^ 人数」。
   // 后者会把 6 人桌开池算成 0.62^5 = 8.6%，严重低估加注的弃牌收益。
   //
-  // 先验是对着公开 GTO 开池范围校准出来的（见 README「翻前 EV 引擎」一节）：
-  // 目标是让 6 人桌 UTG 开池落在 15%~20%，而不是拍一个数。
+  // 但反过来也不能把「面对 3-bet 后的 32%」原样用到多人池：
+  // 3-bet 之后还能行动的人，范围已经强于随机牌，而且人越多「所有人同时弃牌」越难。
+  // v0.26 实测漏洞：6 人桌 3-bet 池里 94o / J6o / 55 被算成正 EV 全下（EV 模型给 32% 弃牌率），
+  // 人类玩家在实战里一眼就能看出这是乱推。因此 raiseCount>=1 时把先验按剩余对手数摊薄。
+  // 开池（raiseCount=0）的先验不动：它是对着 6 人桌 UTG 开池频率校准出来的。
+  const n = Math.max(1, opponentCount);
   const prior =
     raiseCount <= 0
-      ? clamp(0.55 - 0.05 * (opponentCount - 1), 0.2, 0.6)
+      ? clamp(0.55 - 0.05 * (n - 1), 0.2, 0.6)
       : raiseCount === 1
-        ? 0.45
-        : 0.32;
-  if (foldToBet === null) return prior;
+        ? clamp(0.45 / n, 0.08, 0.45)
+        : n === 1
+          ? 0.3
+          : clamp(0.18 / n, 0.015, 0.18);
+  if (foldToBet === null) return clamp(prior, 0.02, 0.9);
   // 收缩估计：样本越多越信实测值。
   // 旧实现固定 45% 权重给先验，等于「永远不太相信数据」——一个从不弃牌的对手
   // 也照样被估成 25% 弃牌率，加注的弃牌收益被凭空放大。
   const w = clamp(0.15 + 0.75 * confidence, 0.15, 0.9);
-  return clamp((1 - w) * prior + w * foldToBet, 0.05, 0.9);
+  // 加注之后的多人池：把平均弃牌率按独立弃牌合成（p^n），
+  // 否则「平均每人弃 40%」会被当成「所有人一起弃 40%」，全下的弃牌收益被高估数倍。
+  const measured =
+    raiseCount <= 0 ? foldToBet : Math.pow(clamp(foldToBet, 0.01, 0.99), n);
+  return clamp((1 - w) * prior + w * measured, 0.02, 0.9);
 }
 
 /**

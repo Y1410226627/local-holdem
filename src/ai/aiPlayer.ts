@@ -191,6 +191,13 @@ export interface AIDecisionOptions {
    * 训练 / 对照评估时忽略（profileOverride 优先）。
    */
   challenge?: boolean;
+  /**
+   * 挑战档蒙特卡洛迭代数覆盖（测量 / 消融用；不传则用挑战档 profile 的 30000）。
+   * 只影响挑战档，专家档请用 maxIterations。
+   */
+  mcIterations?: number;
+  /** 挑战档 GTO 接近度覆盖（测量 / 消融用；不传则用 gtoClosenessFor）。 */
+  closeness?: number;
   /** 子博弈求解器参数（基准 / 低配设备降载用）。 */
   solver?: { iterations?: number; maxCombos?: number; enabled?: boolean };
   /** 转+河联合求解参数（基准 / 低配设备降载用）。 */
@@ -613,6 +620,7 @@ function decidePreflop(
         avgPfr: ctx.opponents.avgPfr,
         pfrOpportunity: ctx.opponents.avgPfrOpportunity,
         raiseCount,
+        opponentCount: countOpponents(view),
         raiseToPotRatio: view.currentBet / Math.max(1, view.pot - legal.callAmount),
       })
     : 0.6;
@@ -1645,7 +1653,15 @@ async function decideCore(
     styleId ?? 0,
     challenge ? 1 : 0,
   );
-  const closeness = options.profileOverride ? 0 : gtoClosenessFor(difficulty, challenge);
+  if (challenge && options.mcIterations !== undefined && Number.isFinite(options.mcIterations)) {
+    const mc = Math.max(1000, Math.floor(options.mcIterations));
+    profile = { ...profile, postflop: { ...profile.postflop, mcIterations: mc } };
+  }
+  const closeness = options.profileOverride
+    ? 0
+    : options.closeness !== undefined && Number.isFinite(options.closeness)
+      ? Math.max(0, Math.min(1, options.closeness))
+      : gtoClosenessFor(difficulty, challenge);
   const potOdds = potOddsOf(view, legal);
   const archetypeId = challenge ? view.self.challengeArchetypeId : undefined;
   const timingTells = challenge ? readTimingTells(view) : [];
@@ -1964,13 +1980,18 @@ async function decideCore(
           };
         }
       }
+      // v0.26 消融实测：河牌求解器对挑战档是负贡献（对当前专家 +11.6 [5.0,18.2]、
+      // 对 v0.3.0 +7.9 [2.2,13.7] 的「关闭后提升」）。求解器假设对手按均衡打，
+      // 而启发式对手（含人类）的下注范围与均衡偏离很大，unsafe 子博弈求解反而亏。
+      // 因此挑战档改为**显式开启才用**（options.solver.enabled === true），默认走启发式；
+      // 专家档的 20% 求解器保持不变（保持专家档冻结）。
       if (
         ENABLE_RIVER_SOLVER &&
         activeOpponents === 1 &&
         view.street === 'river' &&
         legal.callAmount > 0 &&
         !strongRead &&
-        options.solver?.enabled !== false
+        options.solver?.enabled === true
       ) {
         const solved = solveStreetSubgame(view, {
           iterations: options.solver?.iterations ?? 800,

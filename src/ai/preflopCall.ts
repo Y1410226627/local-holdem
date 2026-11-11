@@ -145,6 +145,14 @@ export interface RaiserRangeInput {
   pfrOpportunity?: number | null;
   /** 本街已经发生的加注次数（含这次）。 */
   raiseCount: number;
+  /**
+   * 仍在牌局里的对手数（含本次加注者，1 = 单挑）。
+   *
+   * 多人池的 3-bet / 4-bet 范围比单挑窄：6 人桌一个 3-bet 后面还有人没行动，
+   * 他的范围不可能是 37%。v0.26 实测：6 人桌 3-bet 池里 J6o 被估成对前 37% 有 28.5% 权益，
+   * EV 引擎于是把「全下」算成正期望（+91），真人玩家一眼就能看出这是乱推。
+   */
+  opponentCount?: number;
 }
 
 /**
@@ -184,8 +192,14 @@ export function estimateRaiserRange(input: RaiserRangeInput): number {
   // 3-bet / 4-bet 是开池范围的子集，逐级收窄。
   // 但这条只对「理性对手」成立：一个每次轮到他加注就加的人，3-bet 范围不会比开池窄，
   // 所以按 maniacWeight 把收窄关掉（否则会把他的全下范围从 100% 压到 85%）。
+  // 每多一轮加注就收窄。单挑的 3-bet 范围可以宽到 20%~25%，但多人池必须更窄：
+  // 6 人桌 3-bet 后面还有 3~4 个人没行动，范围不是「开池范围打个 85 折」。
+  const opponents = Math.max(1, input.opponentCount ?? 1);
+  const multiwayTighten = opponents >= 2 ? 0.55 : 1;
+  const perRaise = 0.15 * (opponents >= 2 ? 1.8 : 1);
   const raiseTighten =
-    1 - Math.min(0.35, Math.max(0, input.raiseCount - 1) * 0.15) * (1 - maniacWeight);
+    (1 - Math.min(0.5, Math.max(0, input.raiseCount - 1) * perRaise) * (1 - maniacWeight)) *
+    multiwayTighten;
   range *= raiseTighten;
 
   // 超池大注在没有 PFR 样本时仍按「可能是疯子」放宽。

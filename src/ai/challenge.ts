@@ -432,7 +432,15 @@ export function buildChallengeRanges(
           multiplier *= Math.abs(strength - 0.5) <= 0.22 ? 1.2 : 0.8;
         }
         if (bigWeight === 1) {
-          multiplier *= strength >= 0.75 || strength <= 0.28 ? 1.2 : 0.7;
+          // 低攻击型对手的大注 = 纯价值（HLB polarized 实测：攻击性 0.23、只拿两对+下注）。
+          // 旧实现把「大注」一律解读成两极分化，等于把对方的价值范围当成含诈唬，
+          // 结果挑战档在对方成两对+ 时多跟、多输（300 手探针 −102 vs 专家 −8）。
+          const passiveValue = (player.stats?.aggression ?? 1) < 0.5;
+          if (passiveValue) {
+            multiplier *= strength >= 0.55 ? 1.35 : 0.55;
+          } else {
+            multiplier *= strength >= 0.75 || strength <= 0.28 ? 1.2 : 0.7;
+          }
         }
         return Math.min(1, baseRange(first, second) * multiplier);
       };
